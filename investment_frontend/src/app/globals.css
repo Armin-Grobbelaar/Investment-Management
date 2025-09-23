@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css?family=Noto%20Serif%20Gujarati:700|Noto%20Serif%20Gujarati:400');
+/* For WebKit/Blink browsers */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+  background: transparent; /* You can change this to match your theme */
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+  background: #888; /* You can change this to match your theme */
+  border-radius: 6px;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+  background: #555; /* You can change this to match your theme */
+}
+
+body {
+  background-color: #101214; /* Change this to your desired background color */
+  font-family: 'Noto Serif Gujarati';
+  font-weight: 400;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: 'Noto Serif Gujarati';
+  font-weight: 700;
+}
+
+html {font-size: 100%;} /* 16px */
+
+h1 {font-size: 4.210rem; /* 67.36px */}
+
+h2 {font-size: 3.158rem; /* 50.56px */}
+
+h3 {font-size: 2.369rem; /* 37.92px */}
+
+h4 {font-size: 1.777rem; /* 28.48px */}
+
+h5 {font-size: 1.333rem; /* 21.28px */}
+
+small {font-size: 0.750rem; /* 12px */}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
