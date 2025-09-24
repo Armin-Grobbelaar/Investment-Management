@@ -285,9 +285,24 @@ function AllInvestments() {
           initial_investment_date: minDate.toLocaleDateString('en-ZA', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         }));
         
-        const dates = data.map(item => new Date(item.unit_price_date)); 
-        const min = new Date(Math.min(...dates.map(date => date.getTime())));
-        const max = new Date(Math.max(...dates.map(date => date.getTime())));
+        // Filter out invalid dates
+        const times = data
+          .map(item => new Date(item.unit_price_date).getTime())
+          .filter(time => !isNaN(time));
+        
+        let min: Date | undefined;
+        let max: Date | undefined;
+        
+        if (times.length > 0) {
+          const minTime = times.reduce((a, b) => Math.min(a, b), Infinity);
+          const maxTime = times.reduce((a, b) => Math.max(a, b), -Infinity);
+        
+          min = new Date(minTime);
+          max = new Date(maxTime);
+        }
+        
+        setMinDate(min);
+        setMaxDate(max);
 
         const institutionGroups = InvestmentSummary.reduce((groups: { [key: string]: { totalValue: number, minDate: Date } }, investment) => {
           if (!groups[investment.institution_name]) {
