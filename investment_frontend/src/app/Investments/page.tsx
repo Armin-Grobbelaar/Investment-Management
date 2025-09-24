@@ -1,5 +1,5 @@
 "use client";
-import { Container, Grid, IconButton, Paper } from '@mui/material';
+import { Container, IconButton, Paper, Grid } from "@mui/material";
 import axios from 'axios';
 import { useEffect, useState } from 'react';
 import LineGraph from '../Charts/Graphs/LineGraph';
@@ -393,7 +393,7 @@ function AllInvestments() {
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
             </IconButton>
             <Grid container>
-              <Grid item xs={12}>
+              <Grid>
                 <Paper>
                   <LineGraph
                     data={AllInvestmentValues}
@@ -405,44 +405,44 @@ function AllInvestments() {
                   />
                 </Paper>
               </Grid>
-              <Grid item xs={12}>
+              <Grid>
                 <Paper>
                   <StickyHeadTable columns={investment_summary_table_columns} rows={InvestmentSummary} />
                 </Paper>
               </Grid>
-              <Grid item xs={12}>
+              <Grid>
                 <Paper>
                   <PieChart data={AllInvestmentPieValues} title="Individual Investment Values" theme={darkMode ? 'dark' : 'light'} />
                 </Paper>
               </Grid>
             </Grid>
             <Grid container>
-              <Grid item xs={12} md={6}>
+              <Grid>
                 <Paper>
                   <PieChart data={InvestmentTypePieValues} title="Investment Values by Type" theme={darkMode ? 'dark' : 'light'} />
                 </Paper>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid >
                 <Paper>
                   <StickyHeadTable columns={investment_type_table_columns} rows={InvestmentTypeTableRows} />
                 </Paper>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid>
                 <Paper>
                   <PieChart data={InvestmentCurrencyPieValues} title="Investment Values by Currency" theme={darkMode ? 'dark' : 'light'} />
                 </Paper>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid>
                 <Paper>
                   <StickyHeadTable columns={investment_currency_table_columns} rows={InvestmentCurrencyTableRows} />
                 </Paper>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid>
                 <Paper>
                   <PieChart data={InvestmentInsitutionPieValues} title="Investment Values by Institution" theme={darkMode ? 'dark' : 'light'} />
                 </Paper>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid>
                 <Paper>
                   <StickyHeadTable columns={investment_institution_table_columns} rows={InvestmentInsitutionTableRows} />
                 </Paper>

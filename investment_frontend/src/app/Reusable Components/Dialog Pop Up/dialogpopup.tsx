@@ -39,7 +39,7 @@ const DialogComponent: React.FC<DialogComponentProps> = ({
       <DialogContent>
         <Grid container spacing={2}>
           {headings.map((heading, index) => (
-            <Grid item xs={12} key={index}>
+            <Grid key={index}>
               <Typography variant="h6" fontWeight="bold">
                 {heading}
               </Typography>

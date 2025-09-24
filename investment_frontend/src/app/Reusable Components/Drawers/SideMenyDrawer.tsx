@@ -21,17 +21,14 @@ interface Props {
 const DrawerComponent: React.FC<Props> = ({ menuItems }) => {
   const [open, setOpen] = useState<boolean>(false);
 
-  const handleToggleDrawer = () => {
-    setOpen(!open);
-  };
+  const handleToggleDrawer = () => setOpen(!open);
 
   const handleMenuItemClick = (url: string) => {
-    // Navigate to the specified URL
     window.location.href = url;
   };
 
   return (
-    <React.Fragment>
+    <>
       <IconButton onClick={handleToggleDrawer}>
         {open ? <ChevronLeftIcon /> : <MenuIcon />}
       </IconButton>
@@ -46,7 +43,11 @@ const DrawerComponent: React.FC<Props> = ({ menuItems }) => {
                 <ListItemText primary={menuItem.heading} />
               </ListItem>
               {menuItem.items.map((item, subIndex) => (
-                <ListItem button key={subIndex} onClick={() => handleMenuItemClick(menuItem.urls[subIndex])}>
+                <ListItem
+                  key={subIndex}
+                  component="button"
+                  onClick={() => handleMenuItemClick(menuItem.urls[subIndex])}
+                >
                   <ListItemText primary={item} />
                 </ListItem>
               ))}
@@ -54,7 +55,7 @@ const DrawerComponent: React.FC<Props> = ({ menuItems }) => {
           ))}
         </List>
       </Drawer>
-    </React.Fragment>
+    </>
   );
 };
 

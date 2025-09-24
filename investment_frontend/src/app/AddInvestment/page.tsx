@@ -131,16 +131,16 @@ export default function AddInvestment() {
             </IconButton>
         <form onSubmit={handleSubmit}>
          <Grid container spacing={2} style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', transition: 'background-color 0.3s' }}>
-           <Grid item xs={12} md={6}>
+           <Grid>
              <TextField name="institutionsName" label="Institution's Name" required fullWidth value={values.institutionsName} onChange={handleChange} onBlur={handleBlur} error={touched.institutionsName && !!errors.institutionsName} helperText={errors.institutionsName} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid>
              <TextField name="investmentName" label="Investment Name" required fullWidth value={values.investmentName} onChange={handleChange} onBlur={handleBlur} error={touched.investmentName && !!errors.investmentName} helperText={errors.investmentName} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="investmentTicker" label="Investment Ticker/Class" required fullWidth value={values.investmentTicker} onChange={handleChange} onBlur={handleBlur} error={touched.investmentTicker && !!errors.investmentTicker} helperText={errors.investmentTicker} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid>
             <FormControl fullWidth error={touched.investmentType && !!errors.investmentType}>
              <Select
                name="investmentType"
@@ -163,7 +163,7 @@ export default function AddInvestment() {
              )}
            </FormControl>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid>
            <FormControl fullWidth error={touched.unitCurrency && !!errors.unitCurrency}>
             <Select
               name="unitCurrency" // Add the name attribute
@@ -186,16 +186,16 @@ export default function AddInvestment() {
              )}
           </FormControl>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="initialUnitPrice" label="Initial Unit Price" type="number" required fullWidth value={values.initialUnitPrice} onChange={handleChange} onBlur={handleBlur} error={touched.initialUnitPrice && !!errors.initialUnitPrice} helperText={errors.initialUnitPrice} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="currentUnitPrice" label="Current Unit Price" type="number" required fullWidth value={values.currentUnitPrice} onChange={handleChange} onBlur={handleBlur} error={touched.currentUnitPrice && !!errors.currentUnitPrice} helperText={errors.currentUnitPrice} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="numberOfUnitsHeld" label="Number of Units Held" type="number" required fullWidth value={values.numberOfUnitsHeld} onChange={handleChange} onBlur={handleBlur} error={touched.numberOfUnitsHeld && !!errors.numberOfUnitsHeld} helperText={errors.numberOfUnitsHeld} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid>
            <FormControl fullWidth>
               <LocalizationProvider dateAdapter={AdapterDayjs}>
               <DatePicker
@@ -210,19 +210,19 @@ export default function AddInvestment() {
               </LocalizationProvider>
              </FormControl>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="totalDividends" label="Total Dividends Received" type="number" required fullWidth value={values.totalDividends} onChange={handleChange} onBlur={handleBlur} error={touched.totalDividends && !!errors.totalDividends} helperText={errors.totalDividends} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="totalFees" label="Total Fees Paid" type="number" required fullWidth value={values.totalFees} onChange={handleChange} onBlur={handleBlur} error={touched.totalFees && !!errors.totalFees} helperText={errors.totalFees} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid >
              <TextField name="totalTax" label="Total Tax Paid" type="number" required fullWidth value={values.totalTax} onChange={handleChange} onBlur={handleBlur} error={touched.totalTax && !!errors.totalTax} helperText={errors.totalTax} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }} />
            </Grid>
-           <Grid item xs={12} md={6}>
+           <Grid>
              <TextField name="investmentFee" label="Investment Fee (%)" type="number" required fullWidth value={values.investmentFee} onChange={handleChange} onBlur={handleBlur} error={touched.investmentFee && !!errors.investmentFee} helperText={errors.investmentFee} sx={{ '& .MuiInput-root.Mui-error': { color: theme.palette.error.main } }}/>
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid>
           <FormControl fullWidth error={touched.investmentStatus && !!errors.investmentStatus}>
             <Select
               name="investmentStatus" // Add the name attribute
@@ -245,10 +245,10 @@ export default function AddInvestment() {
           </FormControl>
           </Grid>
            </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid >
           <Button variant="contained" onClick={handleDialogOpen} >Add Investment</Button>
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid>
           <Button variant="contained">Clear</Button>
           </Grid>
         </form>
