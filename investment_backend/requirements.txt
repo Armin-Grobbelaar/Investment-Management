@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+psycopg2-binary
+sqlalchemy
+requests
+numpy
+pandas
+yfinance
+matplotlib
+reportlab
