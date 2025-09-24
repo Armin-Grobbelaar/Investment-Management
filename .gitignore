@@ -1,0 +1,18 @@
+# Ignore backend-generated files
+investment_backend/*.csv
+investment_backend/*.png
+investment_backend/*.jpg
+investment_backend/__pycache__/
+investment_backend/.venv/
+*.pyc
+
+## Ignore frontend-generated files
+investment_frontend/node_modules
+investment_frontend/.next
+investment_frontend/.turbo
+investment_frontend/.vercel
+
+# System / editor
+.env
+.DS_Store
+.vscode/

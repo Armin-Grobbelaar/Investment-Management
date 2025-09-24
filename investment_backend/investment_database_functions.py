@@ -938,7 +938,7 @@ add_investment("Investments", "Satrix", "2022/02/16", "ETF", "Satrix MSCI World"
 #investment_pdf.append("test.pdf")
 #send_investment_email(sending_email, sending_email_passphrase, receiving_email, investment_pdf)
 add_investment("Investments","Sygnia", "2023/03/06", "ETF", "Sygnia Itrix MSCI USA Index ETF", "SYGUS.JO", "$", 84.42, 84.42, 10, 0, 0,0, 1.56, "Active")
-investment_database_connection.commit()
+#investment_database_connection.commit()
 #generate_investment_report()
 #import_unit_prices_csv("test.csv", "Sygnia Itrix MSCI USA Index ETF", "$")
 #Read unit prices from csv
