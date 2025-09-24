@@ -887,68 +887,69 @@ def get_investment_summary(database_name):
     return investment_id
 
 
-#add_user("Armin", "Grobbelaar")
-#print(get_all_investment_values("Investments"))
-create_connection("Investments")
-add_investment("Investments", "Satrix", "2022/02/16", "ETF", "Satrix MSCI World", "STXWDM.JO", "R", 63.66879883, 63.66879883, 20, 0, 0,0, 1.56, "Active")
-#add_transaction("Satrix MSCI World", "2023/02/17", "Buy", 703.0759766, 70.30759766, 10, True, 0, True, 89.56)
-#add_dividend("Satrix MSCI World", "2024/02/19", 4, 600, True, 120, True, 48, 10)
-#add_tax("Satrix MSCI Wo14498.89rld", "2024/02/21", 100, 20)
-#update_returns("Satrix MSCI World", "2024/03/21", 2, 6, 8, 15, 6, 17, 89)
-#investment_database_connection.commit()
-#import_unit_prices_csv("test1.csv", "Satrix MSCI World", "ZAc")
-#investment_database_connection.commit()
-#update_retu
-
-#add_investment("Investments","Satrix", "2023/03/06", "ETF", "Satrix Nasdaq 100", "STXNDQ.JO", "R", 126.9586035, 126.9586035, 50, 0, 0,0, 1.56, "Active")
-#add_transaction("Satrix Nasdaq 100", "2023/11/16", "Buy", 3288.09, 164.4044922, 20, True, 240, True, 89.56)
-#add_dividend("Satrix Nasdaq 100", "2023/11/18", 4, 600, True, 120, True, 48, 10)
-#add_tax("BlackRock EURO STOXX 50", "2023/11/20", 100, 20)
-#update_returns("Satrix Nasdaq 100", "2024/03/21", 2, 9, 8, 15, 6, 17, 89)
-#investment_database_connection.commit()
-#import_unit_prices_csv("test2.csv", "Satrix Nasdaq 100", "ZAc")
-#investment_database_connection.commit()
-
-#add_investment("Sygnia", "2023/03/06", "ETF", "Sygnia Itrix Euro Stoxx 50", "SYGEU.JO", "R", 84.42, 84.42, 10, 0, 0, 1.56)
-#add_transaction("Sygnia Itrix Euro Stoxx 50", "2024/03/01", 10093, 100.93, 100, True, 240)
-#add_dividend("Sygnia Itrix Euro Stoxx 50", "2024/03/03", 4, 600, True, 120, True, 48, 10)
-#add_tax("Sygnia Itrix Euro Stoxx 50", "2024/03/04", 100, 20)
-#update_returns("Sygnia Itrix Euro Stoxx 50", "2024/03/21", 18, 9, 8, 15, 6, 17, 89)
-#investment_database_connection.commit()
-#import_unit_prices_csv("test3.csv", "Sygnia Itrix Euro Stoxx 50", "ZAR")
-#investment_database_connection.commit()
-
-#add_investment("1nvest", "2023/06/06", "ETF", "1nvest S&P500 Feeder", "ETF500.JO", "R", 378.9774219, 378.9774219, 40, 0, 0, 1.56)
-#add_transaction("1nvest S&P500 Feeder", "2023/10/16", 14498.89, 426.4380078, 34, True, 240)
-#add_dividend("1nvest S&P500 Feeder", "2023/10/18", 4, 600, True, 120, True, 48, 10)
-#add_tax("1nvest S&P500 Feeder", "2023/10/20", 100, 20)
-#update_returns("1nvest S&P500 Feeder", "2024/03/21", 18, 20, 8, 15, 6, 17, 89)
-#investment_database_connection.commit()
-#import_unit_prices_csv("test4.csv", "1nvest S&P500 Feeder", "ZAc")
-#investment_database_connection.commit()
-#daily_update()
-#add_investment("Europe", "2023/03/06", "Forex", "Foreign Currency", "GBP/ZAR=X", "£", 15.7, 15.7, 100, 0, 0, 0)
-#add_investment("UK", "2023/03/06", "Forex", "Foreign Currency", "EUR/ZAR=X", "€", 15.7, 15.7, 100, 0, 0, 0)
-#investment_database_connection.commit()
-
-#sending_email ="armin.investmentmanagement@gmail.com"
-#sending_email_passphrase = "aejf xmbx xpsy fvsj"
-#receiving_email = "armin.grobbelaar256@gmail.com"
-#investment_pdf = []
-#investment_pdf.append("test.pdf")
-#send_investment_email(sending_email, sending_email_passphrase, receiving_email, investment_pdf)
-add_investment("Investments","Sygnia", "2023/03/06", "ETF", "Sygnia Itrix MSCI USA Index ETF", "SYGUS.JO", "$", 84.42, 84.42, 10, 0, 0,0, 1.56, "Active")
-#investment_database_connection.commit()
-#generate_investment_report()
-#import_unit_prices_csv("test.csv", "Sygnia Itrix MSCI USA Index ETF", "$")
-#Read unit prices from csv
-#unit_prices = pd.read_csv("all_unit_prices.csv")
-
-#for i in range(len(unit_prices)):
-#    investment_database_cursor.execute("INSERT INTO unit_prices (id, unit_price_date, unit_price, unit_price_change, percentage_unit_price_change) VALUES (%s, DATE %s, %s, %s, %s)", (int(unit_prices.loc[i, "id"]), unit_prices.loc[i, "unit_price_date"], float(unit_prices.loc[i, "unit_price"]), float(unit_prices.loc[i, "unit_price_change"]), float(unit_prices.loc[i, "percentage_unit_price_change"]))
-
-
-#investment_database_cursor.execute("\copy unit_prices(id, unit_price_date, unit_price, unit_price_change, percentage_unit_price_change) FROM '/home/armin/.config/scripts/investments/SYGEU.JO_clean.csv' DELIMITER ',' CSV HEADER;")
+if __name__ == "__main__":
+    #add_user("Armin", "Grobbelaar")
+    #print(get_all_investment_values("Investments"))
+    create_connection("Investments")
+    add_investment("Investments", "Satrix", "2022/02/16", "ETF", "Satrix MSCI World", "STXWDM.JO", "R", 63.66879883, 63.66879883, 20, 0, 0,0, 1.56, "Active")
+    #add_transaction("Satrix MSCI World", "2023/02/17", "Buy", 703.0759766, 70.30759766, 10, True, 0, True, 89.56)
+    #add_dividend("Satrix MSCI World", "2024/02/19", 4, 600, True, 120, True, 48, 10)
+    #add_tax("Satrix MSCI Wo14498.89rld", "2024/02/21", 100, 20)
+    #update_returns("Satrix MSCI World", "2024/03/21", 2, 6, 8, 15, 6, 17, 89)
+    #investment_database_connection.commit()
+    #import_unit_prices_csv("test1.csv", "Satrix MSCI World", "ZAc")
+    #investment_database_connection.commit()
+    #update_retu
+    
+    #add_investment("Investments","Satrix", "2023/03/06", "ETF", "Satrix Nasdaq 100", "STXNDQ.JO", "R", 126.9586035, 126.9586035, 50, 0, 0,0, 1.56, "Active")
+    #add_transaction("Satrix Nasdaq 100", "2023/11/16", "Buy", 3288.09, 164.4044922, 20, True, 240, True, 89.56)
+    #add_dividend("Satrix Nasdaq 100", "2023/11/18", 4, 600, True, 120, True, 48, 10)
+    #add_tax("BlackRock EURO STOXX 50", "2023/11/20", 100, 20)
+    #update_returns("Satrix Nasdaq 100", "2024/03/21", 2, 9, 8, 15, 6, 17, 89)
+    #investment_database_connection.commit()
+    #import_unit_prices_csv("test2.csv", "Satrix Nasdaq 100", "ZAc")
+    #investment_database_connection.commit()
+    
+    #add_investment("Sygnia", "2023/03/06", "ETF", "Sygnia Itrix Euro Stoxx 50", "SYGEU.JO", "R", 84.42, 84.42, 10, 0, 0, 1.56)
+    #add_transaction("Sygnia Itrix Euro Stoxx 50", "2024/03/01", 10093, 100.93, 100, True, 240)
+    #add_dividend("Sygnia Itrix Euro Stoxx 50", "2024/03/03", 4, 600, True, 120, True, 48, 10)
+    #add_tax("Sygnia Itrix Euro Stoxx 50", "2024/03/04", 100, 20)
+    #update_returns("Sygnia Itrix Euro Stoxx 50", "2024/03/21", 18, 9, 8, 15, 6, 17, 89)
+    #investment_database_connection.commit()
+    #import_unit_prices_csv("test3.csv", "Sygnia Itrix Euro Stoxx 50", "ZAR")
+    #investment_database_connection.commit()
+    
+    #add_investment("1nvest", "2023/06/06", "ETF", "1nvest S&P500 Feeder", "ETF500.JO", "R", 378.9774219, 378.9774219, 40, 0, 0, 1.56)
+    #add_transaction("1nvest S&P500 Feeder", "2023/10/16", 14498.89, 426.4380078, 34, True, 240)
+    #add_dividend("1nvest S&P500 Feeder", "2023/10/18", 4, 600, True, 120, True, 48, 10)
+    #add_tax("1nvest S&P500 Feeder", "2023/10/20", 100, 20)
+    #update_returns("1nvest S&P500 Feeder", "2024/03/21", 18, 20, 8, 15, 6, 17, 89)
+    #investment_database_connection.commit()
+    #import_unit_prices_csv("test4.csv", "1nvest S&P500 Feeder", "ZAc")
+    #investment_database_connection.commit()
+    #daily_update()
+    #add_investment("Europe", "2023/03/06", "Forex", "Foreign Currency", "GBP/ZAR=X", "£", 15.7, 15.7, 100, 0, 0, 0)
+    #add_investment("UK", "2023/03/06", "Forex", "Foreign Currency", "EUR/ZAR=X", "€", 15.7, 15.7, 100, 0, 0, 0)
+    #investment_database_connection.commit()
+    
+    #sending_email ="armin.investmentmanagement@gmail.com"
+    #sending_email_passphrase = "aejf xmbx xpsy fvsj"
+    #receiving_email = "armin.grobbelaar256@gmail.com"
+    #investment_pdf = []
+    #investment_pdf.append("test.pdf")
+    #send_investment_email(sending_email, sending_email_passphrase, receiving_email, investment_pdf)
+    add_investment("Investments","Sygnia", "2023/03/06", "ETF", "Sygnia Itrix MSCI USA Index ETF", "SYGUS.JO", "$", 84.42, 84.42, 10, 0, 0,0, 1.56, "Active")
+    #investment_database_connection.commit()
+    generate_investment_report()
+    #import_unit_prices_csv("test.csv", "Sygnia Itrix MSCI USA Index ETF", "$")
+    #Read unit prices from csv
+    #unit_prices = pd.read_csv("all_unit_prices.csv")
+    
+    #for i in range(len(unit_prices)):
+    #    investment_database_cursor.execute("INSERT INTO unit_prices (id, unit_price_date, unit_price, unit_price_change, percentage_unit_price_change) VALUES (%s, DATE %s, %s, %s, %s)", (int(unit_prices.loc[i, "id"]), unit_prices.loc[i, "unit_price_date"], float(unit_prices.loc[i, "unit_price"]), float(unit_prices.loc[i, "unit_price_change"]), float(unit_prices.loc[i, "percentage_unit_price_change"]))
+    
+    
+    #investment_database_cursor.execute("\copy unit_prices(id, unit_price_date, unit_price, unit_price_change, percentage_unit_price_change) FROM '/home/armin/.config/scripts/investments/SYGEU.JO_clean.csv' DELIMITER ',' CSV HEADER;")
 
 
 
