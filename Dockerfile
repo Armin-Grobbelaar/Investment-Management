@@ -39,9 +39,9 @@ COPY investment_backend/entrypoint.sh .
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh
 
-# Expose ports
-EXPOSE 3337  # FastAPI
-EXPOSE 3000  # Next.js
+# Expose ports FasrAPI & Next.js
+EXPOSE 3337
+EXPOSE 3000  
 
 # Start script
 ENTRYPOINT ["./entrypoint.sh"]

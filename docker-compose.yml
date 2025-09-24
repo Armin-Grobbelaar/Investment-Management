@@ -1,0 +1,37 @@
+services:
+  app:
+    image: yourdockerhubusername/investment_app:latest
+    container_name: investment_app
+    restart: unless-stopped
+    ports:
+      - "3337:3337"  # FastAPI
+      - "3000:3000"  # Next.js
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: changeme
+      INVESTMENTS_DB: Investments
+      USERS_DB: Users
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    container_name: investment_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: Investments
+    ports:
+      - "5432:5432"
+    volumes:
+      - investment_data:/var/lib/postgresql/data
+    command: >
+      bash -c "docker-entrypoint.sh postgres &
+               sleep 5 &&
+               psql -U postgres -c 'CREATE DATABASE Users;' &&
+               fg"
+
+volumes:
+  investment_data:
