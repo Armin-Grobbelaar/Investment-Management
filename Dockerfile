@@ -16,9 +16,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install system dependencies for psycopg2 and matplotlib
+# Install system dependencies for psycopg2, matplotlib, pg_isready, Node.js
 RUN apt-get update && apt-get install -y \
-    build-essential libpq-dev python3-dev gcc git curl \
+    build-essential libpq-dev python3-dev gcc git curl postgresql-client nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
@@ -28,20 +28,24 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY investment_backend/ ./backend
 
-# Copy frontend build
+# Copy frontend build artifacts
 COPY --from=frontend-build /app/frontend/.next ./frontend/.next
 COPY --from=frontend-build /app/frontend/public ./frontend/public
 COPY --from=frontend-build /app/frontend/package*.json ./frontend/
 
+# Install frontend dependencies in the final image
+WORKDIR /app/frontend
+RUN npm install --production
+
 # Copy entrypoint script
-COPY investment_backend/entrypoint.sh .
+COPY investment_backend/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Set workdir back to /app
+WORKDIR /app
 
-# Expose ports FasrAPI & Next.js
-EXPOSE 3337
-EXPOSE 3000  
+# Expose ports
+EXPOSE 3337 3000
 
 # Start script
 ENTRYPOINT ["./entrypoint.sh"]

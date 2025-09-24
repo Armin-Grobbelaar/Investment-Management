@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Use PGPASSWORD for automatic authentication
+export PGPASSWORD="$POSTGRES_PASSWORD"
+
 echo "Waiting for PostgreSQL..."
 until pg_isready -h "$POSTGRES_HOST" -p 5432 -U "$POSTGRES_USER"; do
   sleep 2
@@ -16,10 +19,10 @@ else
     echo "Tables already exist, skipping creation"
 fi
 
-# Start FastAPI backend on port 3337
+# Start FastAPI backend in the background
 echo "Starting FastAPI backend..."
 uvicorn backend.main:investment_api --host 0.0.0.0 --port 3337 --reload &
 
-# Start Next.js frontend
+# Start Next.js frontend in the foreground
 echo "Starting Next.js frontend..."
 npm --prefix frontend run start
