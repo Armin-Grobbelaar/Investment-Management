@@ -21,7 +21,7 @@ fi
 
 # Start FastAPI backend in the background
 echo "Starting FastAPI backend..."
-uvicorn backend.main:investment_api --host 0.0.0.0 --port 3337 --reload &
+uvicorn investment_backend_fastapi:investment_api --host 0.0.0.0 --port 3337 --reload &
 
 # Start Next.js frontend in the foreground
 echo "Starting Next.js frontend..."
