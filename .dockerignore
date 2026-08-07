@@ -1,0 +1,43 @@
+# Version control
+.git
+.gitignore
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.history
+.tox
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis
+.pytest_cache
+
+# Node.js
+**/node_modules
+**/npm-debug.log
+**/yarn-error.log
+**/.next
+**/out
+**/build
+**/dist
+**/tsconfig.tsbuildinfo
+
+# App specific
+backend.log
+investment_frontend/tsconfig.tsbuildinfo
+investment_frontend/frontend.pid
+
+# OS files
+.DS_Store
+Thumbs.db

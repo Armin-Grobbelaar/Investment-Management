@@ -7,6 +7,7 @@ import ListItemText from '@mui/material/ListItemText';
 import IconButton from '@mui/material/IconButton';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import MenuIcon from '@mui/icons-material/Menu';
+import Link from 'next/link';
 
 interface MenuItem {
   heading: string;
@@ -22,10 +23,6 @@ const DrawerComponent: React.FC<Props> = ({ menuItems }) => {
   const [open, setOpen] = useState<boolean>(false);
 
   const handleToggleDrawer = () => setOpen(!open);
-
-  const handleMenuItemClick = (url: string) => {
-    window.location.href = url;
-  };
 
   return (
     <>
@@ -43,13 +40,14 @@ const DrawerComponent: React.FC<Props> = ({ menuItems }) => {
                 <ListItemText primary={menuItem.heading} />
               </ListItem>
               {menuItem.items.map((item, subIndex) => (
-                <ListItem
-                  key={subIndex}
-                  component="button"
-                  onClick={() => handleMenuItemClick(menuItem.urls[subIndex])}
-                >
-                  <ListItemText primary={item} />
-                </ListItem>
+                <Link key={subIndex} href={menuItem.urls[subIndex]} passHref style={{ textDecoration: 'none', color: 'inherit' }}>
+                  <ListItem
+                    component="div"
+                    sx={{ '&:hover': { backgroundColor: 'action.hover' } }}
+                  >
+                    <ListItemText primary={item} />
+                  </ListItem>
+                </Link>
               ))}
             </React.Fragment>
           ))}

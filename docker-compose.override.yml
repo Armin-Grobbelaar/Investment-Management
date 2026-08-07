@@ -1,0 +1,4 @@
+services:
+  app:
+    ports:
+      - "3337:3337"  # FastAPI only

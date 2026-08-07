@@ -1,16 +1,21 @@
 "use client";
-import { Container, IconButton, Paper, Grid } from "@mui/material";
+import { Container, IconButton, Paper, Grid, Typography, Box, Card, CardContent, Button } from "@mui/material";
 import axios from 'axios';
-import { useEffect, useState } from 'react';
-import LineGraph from '../Charts/Graphs/LineGraph';
+import { useEffect, useState, useMemo, Suspense, lazy } from 'react';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { ThemeProvider } from '@mui/material/styles';
-import StickyHeadTable from '../Charts/Tables/StickyHeadTable';
-import PieChart from '../Charts/Graphs/PieChart';
 import { brandingDarkTheme, brandingLightTheme } from '../Themes/muiTheme';
 import CircularProgress from '@mui/material/CircularProgress';
 import DrawerComponent from '../Reusable Components/Drawers/SideMenyDrawer';
+import Link from 'next/link';
+
+// Lazy load heavy components for better initial performance
+const LineGraph = lazy(() => import('../Charts/Graphs/LineGraph'));
+const PieChart = lazy(() => import('../Charts/Graphs/PieChart'));
+const BarChart = lazy(() => import('../Charts/Graphs/BarChart'));
+const AreaChart = lazy(() => import('../Charts/Graphs/AreaChart'));
+const StickyHeadTable = lazy(() => import('../Charts/Tables/StickyHeadTable'));
 
 interface Point {
   x: Date;
@@ -31,6 +36,35 @@ interface PieChartData {
   }[];
 }
 
+// Optimized interfaces for the new API endpoints
+interface DashboardData {
+  investment_summary: InvestmentSummaryInterface[];
+  portfolio_totals: PortfolioTotals;
+  currencies_in_portfolio: string[];
+  types_in_portfolio: string[];
+  base_currency: string;
+  timestamp: string;
+  cache_expires_in: number;
+}
+
+interface TimeseriesData {
+  timeseries: LineGraphData[];
+  date_range: {
+    min: string;
+    max: string;
+  };
+  base_currency: string;
+  total_investments: number;
+}
+
+interface PortfolioTotals {
+  total_value: number;
+  by_currency: { [key: string]: number };
+  by_type: { [key: string]: number };
+  base_currency: string;
+  count_investments: number;
+}
+
 interface InvestmentSummaryInterface {
   id: number;
   institution_name: string;
@@ -42,28 +76,14 @@ interface InvestmentSummaryInterface {
   total_units_held: number;
   initial_unit_price: number;
   initial_investment_date: string;
-  exchange_rate?: number;
+  display_currency?: string;
   investment_value_in_native_currency?: number;
   unit_price_in_native_currency?: number;
   initial_unit_price_in_native_currency?: number;
 }
 
-interface AllInvestmentData {
-  id: number;
-  investment_name: string;
-  unit_price_date: any;
-  unit_price: number;
-  number_of_units: number;
-  investment_value: number;
-  unit_currency: string;
-  investment_type: string;
-  exchange_rate: number;
-  investment_value_in_native_currency: number;
-
-};
-
 interface InvestmentTypeTableRowsInterface {
-  id: number; 
+  id: number;
   investment_type: string;
   investment_value_in_native_currency: number;
   initial_investment_date: string;
@@ -87,6 +107,13 @@ interface MenuItem {
   heading: string;
   items: string[];
   urls: string[];
+}
+
+interface KeyMetric {
+  metric: string;
+  value: number;
+  unit: string;
+  formatted_value: string;
 }
 
 const investment_summary_table_columns = [
@@ -139,245 +166,83 @@ function AllInvestments() {
   const [InvestmentCurrencyTableRows, setInvestmentCurrencyTableRows] = useState<InvestmentCurrencyTableRowsInterface[] | null>(null);
   const [InvestmentInsitutionPieValues, setInvestmentInstitutionPieValues] = useState<PieChartData | null>(null);
   const [InvestmentInsitutionTableRows, setInvestmentInstitutionTableRows] = useState<InvestmentInstitutionTableRowsInterface[] | null>(null);
+  const [barCharts, setBarCharts] = useState<any[]>([]);
+  const [areaCharts, setAreaCharts] = useState<any[]>([]);
+  const [keyMetrics, setKeyMetrics] = useState<KeyMetric[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [minDate, setMinDate] = useState<Date>();
   const [maxDate, setMaxDate] = useState<Date>();
   const [darkMode, setDarkMode] = useState(false);
+  const [visibleDatasets, setVisibleDatasets] = useState<LineGraphData[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchAllInvestmentValues() {
+    async function fetchServerProcessedData() {
       try {
-        const InvestmentSummaryResponse = await axios.get("http://127.0.0.1:3337/investment_summary/Investments")
-        const InvestmentSummary: InvestmentSummaryInterface[] = InvestmentSummaryResponse.data;
+        console.log('🚀 Fetching dashboard data...');
+        const response = await axios.get("/api/dashboard_charts/Investments", { timeout: 30000 });
+        const chartData = response.data;
 
-        const investment_values_response = await axios.get("http://127.0.0.1:3337/all_investment_values/Investments");
-        const data: AllInvestmentData[] = investment_values_response.data;     
-        console.log(data)
-        const InvestmentNames: Array<string> = InvestmentSummary.map((investment) => investment.investment_name)
-        const AllInvestmentGraphData: LineGraphData[] = []
-         InvestmentNames.forEach((investment) =>{
-          let tempAllInvestmentData = data.filter((item) => item.investment_name == investment)
-                    let mappedData = tempAllInvestmentData.map((item) => ({
-            x: new Date(item.unit_price_date),
-            y: item.investment_value_in_native_currency
-          }));
+        const dateRange = chartData.timeseries_date_range || {};
+        const minDate = dateRange.min ? new Date(dateRange.min) : new Date('2023-01-01');
+        const maxDate = dateRange.max ? new Date(dateRange.max) : new Date();
 
-          let tempInvestmentData: LineGraphData = {
-            label: investment,
-            data: mappedData,
-            borderColour: getRandomColor()
-          };
-          AllInvestmentGraphData.push(tempInvestmentData)
-
-        });
-
-        const labels: string[] = [];
-        const values: number[] = [];
-        const backgroundColors: string[] = [];
-
-        const lastValues: { [key: string]: { investment_value_in_native_currency?: number, exchange_rate?: number } } = {};
-
-        data.forEach((item) => {
-          lastValues[item.investment_name] = {
-            investment_value_in_native_currency: item.investment_value_in_native_currency,
-            exchange_rate: item.exchange_rate,
-          };
-        });
-
-        InvestmentSummary.forEach((investment) => {
-          labels.push(investment.investment_name);
-
-          const lastValue = lastValues[investment.investment_name];
-          if (lastValue !== undefined && lastValue.exchange_rate !== undefined) {
-            const unitPriceInNativeCurrency = investment.unit_price * lastValue.exchange_rate;
-            const initialUnitPriceInNativeCurrency = investment.initial_unit_price * lastValue.exchange_rate;
-            const totalUnitsHeld = investment.total_units_held;
-            investment.investment_value_in_native_currency = unitPriceInNativeCurrency * totalUnitsHeld;
-            investment.unit_price_in_native_currency = unitPriceInNativeCurrency;
-            investment.initial_unit_price_in_native_currency = initialUnitPriceInNativeCurrency;
-            investment.initial_investment_date = String(new Date(investment.initial_investment_date).toLocaleDateString('en-ZA', { day: '2-digit', month: '2-digit', year: 'numeric' }))
-
-            values.push(investment.investment_value_in_native_currency ?? 0);
-            backgroundColors.push(getRandomColor());
-          }
-        });
-        
-        const totalInvestmentValue = values.reduce((total, value) => total + value, 0);
-
-        const pieChartData: PieChartData = {
-          labels: labels,
-          datasets: [{
-            data: values.map(value => (value/totalInvestmentValue)*100),
-            backgroundColor: backgroundColors,
-          }]
-        };
-
-        const investmentTypeGroups = InvestmentSummary.reduce((groups: { [key: string]: { totalValue: number, minDate: Date } }, investment) => {
-          if (!groups[investment.investment_type]) {
-            groups[investment.investment_type] = {
-              totalValue: 0,
-              minDate: new Date(),
-            };
-          }
-          groups[investment.investment_type].totalValue += investment.investment_value_in_native_currency ?? 0;
-        
-          if (investment.initial_investment_date && new Date(investment.initial_investment_date) < groups[investment.investment_type].minDate) {
-            groups[investment.investment_type].minDate = new Date(investment.initial_investment_date);
-          }
-        
-          return groups;
-        }, {});
-        
-        const investmentTypeLabels = Object.keys(investmentTypeGroups);
-        const investmentTypeValues = Object.values(investmentTypeGroups).map(group => group.totalValue);
-        const investmentTypeMinDates = Object.values(investmentTypeGroups).map(group => group.minDate);
-        const totalTypeInvestmentValue = investmentTypeValues.reduce((total, value) => total + value, 0);
-        
-        const investmentTypePieChartData: PieChartData = {
-          labels: investmentTypeLabels,
-          datasets: [{
-            data: investmentTypeValues.map( value => (value/totalTypeInvestmentValue)*100),
-            backgroundColor: investmentTypeLabels.map(() => getRandomColor()),
-          }],
-        };
-      
-        const investmentTypeTableRows = Object.entries(investmentTypeGroups).map(([investmentType, { totalValue, minDate }], index) => ({
-          id: index,
-          investment_type: investmentType,
-          investment_value_in_native_currency: totalValue,
-          initial_investment_date: minDate.toLocaleDateString('en-ZA', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-        }));
-        
-        const currencyGroups = InvestmentSummary.reduce((groups: { [key: string]: { totalValue: number, minDate: Date } }, investment) => {
-          if (!groups[investment.unit_currency]) {
-            groups[investment.unit_currency] = {
-              totalValue: 0,
-              minDate: new Date(),
-            };
-          }
-          groups[investment.unit_currency].totalValue += investment.investment_value_in_native_currency ?? 0;
-        
-          // Check if the current investment date is earlier than the stored minimum date
-          if (investment.initial_investment_date && new Date(investment.initial_investment_date) < groups[investment.unit_currency].minDate) {
-            groups[investment.unit_currency].minDate = new Date(investment.initial_investment_date);
-          }
-        
-          return groups;
-        }, {});
-        
-        const currencyLabels = Object.keys(currencyGroups);
-        const currencyValues = Object.values(currencyGroups).map(group => group.totalValue);
-        const currencyMinDates = Object.values(currencyGroups).map(group => group.minDate);
-        const totalCurrencyInvestmentValue = currencyValues.reduce((total, value) => total + value, 0);
-        
-        const currencyPieChartData: PieChartData = {
-          labels: currencyLabels,
-          datasets: [{
-            data: currencyValues.map( value => (value/totalCurrencyInvestmentValue)*100),
-            backgroundColor: currencyLabels.map(() => getRandomColor()),
-          }],
-        };
-        
-        const currencyTableRows = Object.entries(currencyGroups).map(([currency, { totalValue, minDate }], index) => ({
-          id: index,
-          unit_currency: currency,
-          investment_value_in_native_currency: totalValue,
-          initial_investment_date: minDate.toLocaleDateString('en-ZA', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-        }));
-        
-        // Filter out invalid dates
-        const times = data
-          .map(item => new Date(item.unit_price_date).getTime())
-          .filter(time => !isNaN(time));
-        
-        let min: Date | undefined;
-        let max: Date | undefined;
-        
-        if (times.length > 0) {
-          const minTime = times.reduce((a, b) => Math.min(a, b), Infinity);
-          const maxTime = times.reduce((a, b) => Math.max(a, b), -Infinity);
-        
-          min = new Date(minTime);
-          max = new Date(maxTime);
-        }
-        
-        setMinDate(min);
-        setMaxDate(max);
-
-        const institutionGroups = InvestmentSummary.reduce((groups: { [key: string]: { totalValue: number, minDate: Date } }, investment) => {
-          if (!groups[investment.institution_name]) {
-            groups[investment.institution_name] = {
-              totalValue: 0,
-              minDate: new Date(),
-            };
-          }
-          groups[investment.institution_name].totalValue += investment.investment_value_in_native_currency ?? 0;
-          
-          if (investment.initial_investment_date && new Date(investment.initial_investment_date) < groups[investment.institution_name].minDate) {
-            groups[investment.institution_name].minDate = new Date(investment.initial_investment_date);
-          }
-          
-          return groups;
-        }, {});
-        
-        const institutionLabels = Object.keys(institutionGroups);
-        const institutionValues = Object.values(institutionGroups).map(group => group.totalValue);
-        const institutionMinDates = Object.values(institutionGroups).map(group => group.minDate);
-        const totalInstitutionInvestmentValue = institutionValues.reduce((total, value) => total + value, 0);
-        
-        const institutionPieChartData: PieChartData = {
-          labels: institutionLabels,
-          datasets: [{
-            data: institutionValues.map(value => (value / totalInstitutionInvestmentValue) * 100),
-            backgroundColor: institutionLabels.map(() => getRandomColor()),
-          }],
-        };
-        
-        const institutionTableRows = Object.entries(institutionGroups).map(([institution, { totalValue, minDate }], index) => ({
-          id: index,
-          institution_name: institution,
-          investment_value_in_native_currency: totalValue,
-          initial_investment_date: minDate.toLocaleDateString('en-ZA', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-        }));
-
-        const menuItems = [
-          {
-            heading: 'Investment Type',
-            items: ['ETF', 'Unit Trust', 'Forex', 'ETN', 'Hedge Fund', 'Deposit'],
-            urls: ['http://localhost:3000/AddInvestment', '/investment-type/unit-trust', '/investment-type/forex', '/investment-type/etn', '/investment-type/hedge-fund', '/investment-type/deposit'],
-          },
-          {
-            heading: 'Investment Currency',
-            items: ['R', '$', '£', '€'],
-            urls: ['/investment-currency/r', '/investment-currency/dollar', '/investment-currency/pound', '/investment-currency/euro'],
-          },
-          {
-            heading: 'Institution',
-            items: ['Institution 1', 'Institution 2', 'Institution 3'],
-            urls: ['/institution/institution-1', '/institution/institution-2', '/institution/institution-3'],
-          },
-        ];
-
-        setAllInvestmentValues(AllInvestmentGraphData);
-        setAllInvestmentPieValues(pieChartData);
-        setInvestmentSummary(InvestmentSummary);
-        setInvestmentTypePieValues(investmentTypePieChartData);
-        setInvestmentTypeTableRows(investmentTypeTableRows);
-        setInvestmentCurrencyPieValues(currencyPieChartData);
-        setInvestmentCurrencyTableRows(currencyTableRows);
-        setInvestmentInstitutionPieValues(institutionPieChartData);
-        setInvestmentInstitutionTableRows(institutionTableRows);
-        setMenuItems(menuItems);
-        setMinDate(min);
-        setMaxDate(max);
-
-      } catch (error) {
-        console.error('Error fetching unit price:', error);
+        setAllInvestmentValues(chartData.timeseries || []);
+        setAllInvestmentPieValues(chartData.individual_pie || { labels: [], datasets: [] });
+        setInvestmentSummary(chartData.summary_table || []);
+        setInvestmentTypePieValues(chartData.type_pie || { labels: [], datasets: [] });
+        setInvestmentTypeTableRows(chartData.type_table || []);
+        setInvestmentCurrencyPieValues(chartData.currency_pie || { labels: [], datasets: [] });
+        setInvestmentCurrencyTableRows(chartData.currency_table || []);
+        setInvestmentInstitutionPieValues(chartData.institution_pie || { labels: [], datasets: [] });
+        setInvestmentInstitutionTableRows(chartData.institution_table || []);
+        setBarCharts(chartData.bar_charts || []);
+        setAreaCharts(chartData.area_charts || []);
+        setKeyMetrics(chartData.key_metrics || []);
+        setMenuItems(chartData.menu_items || []);
+        setMinDate(minDate);
+        setMaxDate(maxDate);
+        setIsLoaded(true);
+        console.log('✅ Dashboard loaded');
+      } catch (error: any) {
+        console.error('❌ Error fetching dashboard data:', error);
+        const msg = error?.response?.data?.detail || error?.message || 'Unknown error';
+        setLoadError(`Failed to load dashboard: ${msg}`);
       }
     }
-
-    fetchAllInvestmentValues();
+    fetchServerProcessedData();
   }, []);
+
+  const handleVisibilityChange = (visibleDatasets: LineGraphData[]) => {
+    console.log('📊 Visibility change detected:', visibleDatasets.length, 'datasets visible');
+
+    if (visibleDatasets.length > 0 && AllInvestmentValues) {
+      // Find the earliest and latest dates from visible datasets only
+      let earliestDate = new Date('2100-01-01');
+      let latestDate = new Date('1900-01-01');
+
+      visibleDatasets.forEach(dataset => {
+        dataset.data.forEach(point => {
+          const date = new Date(point.x);
+          if (date < earliestDate) earliestDate = date;
+          if (date > latestDate) latestDate = date;
+        });
+      });
+
+      console.log('📅 Recalculated date range from visible datasets:');
+      console.log('   Min:', earliestDate.toISOString(), 'Max:', latestDate.toISOString());
+
+      setMinDate(earliestDate);
+      setMaxDate(latestDate);
+      setVisibleDatasets(visibleDatasets);
+    } else {
+      // If no datasets visible, use original range
+      const dateRange = minDate?.toISOString() || '2023-01-01';
+      setVisibleDatasets([]);
+      console.log('⚠️ No visible datasets, using original date range');
+    }
+  };
 
   const toggleDarkMode = () => {
     setDarkMode(prevMode => !prevMode);
@@ -386,80 +251,262 @@ function AllInvestments() {
   return (
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
       <div>
-        {AllInvestmentValues && InvestmentSummary && AllInvestmentPieValues && InvestmentTypePieValues && InvestmentTypeTableRows && InvestmentCurrencyPieValues && InvestmentCurrencyTableRows && InvestmentInsitutionPieValues && InvestmentInsitutionTableRows ? (
-          <Grid style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', transition: 'background-color 0.3s' }}>
+        {isLoaded ? (
+          <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', transition: 'background-color 0.3s' }}>
             <DrawerComponent menuItems={menuItems} />
             <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
             </IconButton>
-            <Grid container>
-              <Grid>
-                <Paper>
-                  <LineGraph
-                    data={AllInvestmentValues}
-                    minDate={minDate}
-                    maxDate={maxDate}
-                    title="Investment values"
-                    xAxisLabel="Date"
-                    yAxisLabel="Value in R"
-                  />
-                </Paper>
+            <Container maxWidth="xl" sx={{ py: 4 }}>
+              <Grid container spacing={3}>
+                {/* Key Metrics Tiles - Dynamic based on server data */}
+                {keyMetrics.map((metric, index) => (
+                  <Grid size={{ xs: 12, sm: 6, lg: 3 }} key={index}>
+                    <Card elevation={3} sx={{ height: '120px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <CardContent sx={{ textAlign: 'center' }}>
+                        <Typography variant="h6" component="div" gutterBottom color="primary">
+                          {metric.metric}
+                        </Typography>
+                        <Typography variant="h4" component="div" gutterBottom sx={{ fontWeight: 'bold' }}>
+                          {metric.formatted_value}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+
+                {/* Line Graph - Full Width - Lazy Loaded */}
+                <Grid size={{ xs: 12 }}>
+                  <Paper elevation={3} sx={{ p: 3 }}>
+                    <Suspense fallback={<div style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress size={50} />
+                      <span style={{ marginLeft: '10px' }}>Loading Line Chart...</span>
+                    </div>}>
+                      <LineGraph
+                        data={AllInvestmentValues}
+                        minDate={minDate}
+                        maxDate={maxDate}
+                        title="Investment values"
+                        xAxisLabel="Date"
+                        yAxisLabel="Value in R"
+                        onVisibilityChange={handleVisibilityChange}
+                      />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Investment Summary Table - Full Width - Lazy Loaded */}
+                <Grid size={{ xs: 12 }}>
+                  <Paper elevation={3} sx={{ p: 3 }}>
+                    <Suspense fallback={<div style={{ height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress size={30} />
+                      <span style={{ marginLeft: '10px' }}>Loading Investment Summary...</span>
+                    </div>}>
+                      <StickyHeadTable columns={investment_summary_table_columns} rows={InvestmentSummary ?? []} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Section Heading: Individual Investments */}
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 3, mb: 2, fontWeight: 'bold' }}>
+                    Individual Investment Values
+                  </Typography>
+                </Grid>
+
+                {/* Individual Investment Section - Pie Chart */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <CircularProgress size={40} />
+                      <span style={{ marginTop: '10px' }}>Loading Individual Investments...</span>
+                    </div>}>
+                      <PieChart data={AllInvestmentPieValues ?? { labels: [], datasets: [] }} title="Individual Investment Values" theme={darkMode ? 'dark' : 'light'} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Section Heading: By Investment Type */}
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 3, mb: 2, fontWeight: 'bold' }}>
+                    Investment Values by Type
+                  </Typography>
+                </Grid>
+
+                {/* Investment Type Pie Chart - LEFT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <CircularProgress size={40} />
+                      <span style={{ marginTop: '10px' }}>Loading Type Chart...</span>
+                    </div>}>
+                      <PieChart data={InvestmentTypePieValues} title="" theme={darkMode ? 'dark' : 'light'} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Investment Type Table - RIGHT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', flexDirection: 'column' }}>
+                    <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress size={30} />
+                      <span style={{ marginLeft: '10px' }}>Loading Type Table...</span>
+                    </div>}>
+                      <StickyHeadTable columns={investment_type_table_columns} rows={InvestmentTypeTableRows ?? []} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Section Heading: By Currency */}
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 3, mb: 2, fontWeight: 'bold' }}>
+                    Investment Values by Currency
+                  </Typography>
+                </Grid>
+
+                {/* Investment Currency Pie Chart - LEFT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <CircularProgress size={40} />
+                      <span style={{ marginTop: '10px' }}>Loading Currency Chart...</span>
+                    </div>}>
+                      <PieChart data={InvestmentCurrencyPieValues} title="" theme={darkMode ? 'dark' : 'light'} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Investment Currency Table - RIGHT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', flexDirection: 'column' }}>
+                    <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress size={30} />
+                      <span style={{ marginLeft: '10px' }}>Loading Currency Table...</span>
+                    </div>}>
+                      <StickyHeadTable columns={investment_currency_table_columns} rows={InvestmentCurrencyTableRows ?? []} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Section Heading: By Institution */}
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 3, mb: 2, fontWeight: 'bold' }}>
+                    Investment Values by Institution
+                  </Typography>
+                </Grid>
+
+                {/* Investment Institution Pie Chart - LEFT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <CircularProgress size={40} />
+                      <span style={{ marginTop: '10px' }}>Loading Institution Chart...</span>
+                    </div>}>
+                      <PieChart data={InvestmentInsitutionPieValues} title="" theme={darkMode ? 'dark' : 'light'} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Investment Institution Table - RIGHT */}
+                <Grid size={{ xs: 12, lg: 6 }}>
+                  <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', flexDirection: 'column' }}>
+                    <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress size={30} />
+                      <span style={{ marginLeft: '10px' }}>Loading Institution Table...</span>
+                    </div>}>
+                      <StickyHeadTable columns={investment_institution_table_columns} rows={InvestmentInsitutionTableRows ?? []} />
+                    </Suspense>
+                  </Paper>
+                </Grid>
+
+                {/* Bar Charts */}
+                {barCharts && Array.isArray(barCharts) && barCharts.length > 0 && barCharts.map((barChart, index) => (
+                  <Grid size={{ xs: 12, lg: 6 }} key={`bar-${index}`}>
+                    <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                        <CircularProgress size={40} />
+                        <span style={{ marginTop: '10px' }}>Loading Bar Chart...</span>
+                      </div>}>
+                        <BarChart data={barChart.data} title={barChart?.title || `Bar Chart ${index + 1}`} type={barChart?.type || 'verticalBar'} theme={darkMode ? 'dark' : 'light'} />
+                      </Suspense>
+                    </Paper>
+                  </Grid>
+                ))}
+
+                {/* Area Charts */}
+                {areaCharts && Array.isArray(areaCharts) && areaCharts.length > 0 && areaCharts.map((areaChart, index) => (
+                  <Grid size={{ xs: 12, lg: 6 }} key={`area-${index}`}>
+                    <Paper elevation={3} sx={{ p: 3, height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                        <CircularProgress size={40} />
+                        <span style={{ marginTop: '10px' }}>Loading Area Chart...</span>
+                      </div>}>
+                        <AreaChart data={areaChart.data} title={areaChart?.title || `Area Chart ${index + 1}`} theme={darkMode ? 'dark' : 'light'} />
+                      </Suspense>
+                    </Paper>
+                  </Grid>
+                ))}
               </Grid>
-              <Grid>
-                <Paper>
-                  <StickyHeadTable columns={investment_summary_table_columns} rows={InvestmentSummary} />
-                </Paper>
-              </Grid>
-              <Grid>
-                <Paper>
-                  <PieChart data={AllInvestmentPieValues} title="Individual Investment Values" theme={darkMode ? 'dark' : 'light'} />
-                </Paper>
-              </Grid>
-            </Grid>
-            <Grid container>
-              <Grid>
-                <Paper>
-                  <PieChart data={InvestmentTypePieValues} title="Investment Values by Type" theme={darkMode ? 'dark' : 'light'} />
-                </Paper>
-              </Grid>
-              <Grid >
-                <Paper>
-                  <StickyHeadTable columns={investment_type_table_columns} rows={InvestmentTypeTableRows} />
-                </Paper>
-              </Grid>
-              <Grid>
-                <Paper>
-                  <PieChart data={InvestmentCurrencyPieValues} title="Investment Values by Currency" theme={darkMode ? 'dark' : 'light'} />
-                </Paper>
-              </Grid>
-              <Grid>
-                <Paper>
-                  <StickyHeadTable columns={investment_currency_table_columns} rows={InvestmentCurrencyTableRows} />
-                </Paper>
-              </Grid>
-              <Grid>
-                <Paper>
-                  <PieChart data={InvestmentInsitutionPieValues} title="Investment Values by Institution" theme={darkMode ? 'dark' : 'light'} />
-                </Paper>
-              </Grid>
-              <Grid>
-                <Paper>
-                  <StickyHeadTable columns={investment_institution_table_columns} rows={InvestmentInsitutionTableRows} />
-                </Paper>
-              </Grid>
-            </Grid>
-          </Grid>
+
+              {/* Bottom Buttons - At the bottom of page content */}
+              <Box sx={{
+                mt: 4,
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 2,
+                flexWrap: 'wrap'
+              }}>
+                <Link href="/NetWorth" passHref>
+                  <Button variant="contained" color="success" size="large" sx={{ minWidth: 160 }}>
+                    💰 Net Worth
+                  </Button>
+                </Link>
+                <Link href="/IRRAnalysis" passHref>
+                  <Button variant="contained" size="large" sx={{ minWidth: 140, background: 'linear-gradient(135deg,#007FFF,#0054a8)' }}>
+                    📈 IRR Analysis
+                  </Button>
+                </Link>
+                <Link href="/ViewInvestmentPredictions" passHref>
+                  <Button variant="contained" color="primary" size="large" sx={{ minWidth: 160 }}>
+                    🔮 View Predictions
+                  </Button>
+                </Link>
+                <Link href="/ViewInvestmentMetrics" passHref>
+                  <Button variant="outlined" color="secondary" size="large" sx={{ minWidth: 140 }}>
+                    📊 View Metrics
+                  </Button>
+                </Link>
+                <Link href="/EditInvestmentData" passHref>
+                  <Button variant="outlined" size="large" sx={{ minWidth: 120 }}>
+                    ✏️ Edit Data
+                  </Button>
+                </Link>
+                <Link href="/BulkImport" passHref>
+                  <Button variant="outlined" color="primary" size="large" sx={{ minWidth: 140 }}>
+                    📥 Bulk Import
+                  </Button>
+                </Link>
+              </Box>
+
+            </Container>
+          </div>
         ) : (
-          <div className="loading-container" style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', transition: 'background-color 0.3s' }}>
+          <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.3s' }}>
             <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
             </IconButton>
-            <div>
-              <CircularProgress />
-            </div>
-            <div style={{ marginLeft: '20px' }}>
-              <p>Loading Investment Data...</p>
-            </div>
+            {loadError ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <Typography variant="h5" color="error" gutterBottom>⚠️ Dashboard Error</Typography>
+                <Typography variant="body1" color="textSecondary" sx={{ mb: 3, maxWidth: 500 }}>{loadError}</Typography>
+                <Button variant="contained" onClick={() => window.location.reload()}>🔄 Retry</Button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <CircularProgress />
+                <Typography variant="body1">Loading Investment Data...</Typography>
+              </div>
+            )}
           </div>
         )}
       </div>

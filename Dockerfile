@@ -2,50 +2,32 @@
 # Stage 1: Build frontend
 # =========================
 FROM node:20-alpine AS frontend-build
-
 WORKDIR /app/frontend
 COPY investment_frontend/package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 COPY investment_frontend/ ./
+RUN rm -rf src/app/api/edit_data
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # =========================
-# Stage 2: Backend + final image
+# Stage 2: Final image
 # =========================
-FROM python:3.13-slim
-
+FROM python:3.12-slim
 WORKDIR /app
-
-# Install system dependencies for psycopg2, matplotlib, pg_isready, Node.js
-RUN apt-get update && apt-get install -y \
-    build-essential libpq-dev python3-dev gcc git curl postgresql-client nodejs npm \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python packages
 COPY investment_backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy backend code
-COPY investment_backend/ ./backend
-
-# Copy frontend build artifacts
-COPY --from=frontend-build /app/frontend/.next ./frontend/.next
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev gcc git curl nodejs \
+    && pip install --default-timeout=1000 --no-cache-dir -r requirements.txt \
+    && playwright install --with-deps chromium \
+    && apt-get purge -y --auto-remove build-essential gcc \
+    && rm -rf /var/lib/apt/lists/*
+COPY investment_backend/ ./
+COPY --from=frontend-build /app/frontend/.next/standalone ./frontend
+COPY --from=frontend-build /app/frontend/.next/static ./frontend/.next/static
 COPY --from=frontend-build /app/frontend/public ./frontend/public
-COPY --from=frontend-build /app/frontend/package*.json ./frontend/
-
-# Install frontend dependencies in the final image
-WORKDIR /app/frontend
-RUN npm install --production
-
-# Copy entrypoint script
 COPY investment_backend/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
-
-# Set workdir back to /app
-WORKDIR /app
-
-# Expose ports
 EXPOSE 3337 3000
-
-# Start script
+ENV NODE_ENV=production PORT=3000 HOSTNAME="0.0.0.0"
 ENTRYPOINT ["./entrypoint.sh"]

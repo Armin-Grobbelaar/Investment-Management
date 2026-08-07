@@ -1,7 +1,7 @@
 "use client";
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, LineController, LineElement, LinearScale, PointElement, Tooltip, Legend, TimeScale } from 'chart.js';
+import { Chart as ChartJS, LineController, LineElement, LinearScale, PointElement, Tooltip, Legend, TimeScale, Chart } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 ChartJS.register(LineController, LineElement, LinearScale, PointElement, Tooltip, Legend, TimeScale);
 
@@ -20,16 +20,53 @@ interface Props {
   data: LineGraphData[] | null;
   minDate?: Date;
   maxDate?: Date;
-  title?: string; 
+  title?: string;
   xAxisLabel?: string;
   yAxisLabel?: string;
+  onVisibilityChange?: (visibleDatasets: LineGraphData[]) => void;
 }
 
-const LineGraph: React.FC<Props> = ({ data, minDate, maxDate, title, xAxisLabel, yAxisLabel }) => {
+const LineGraph: React.FC<Props> = ({ data, minDate, maxDate, title, xAxisLabel, yAxisLabel, onVisibilityChange }) => {
+  const chartRef = useRef<any>(null);
+
+  const getVisibleDatasets = (chart: any) => {
+    if (!chart || !data || !chart.data?.datasets) return data || [];
+
+    return data.filter((_, index) => {
+      return chart.isDatasetVisible(index);
+    });
+  };
+
+  const handleLegendClick = (event: any, legendItem: any, legend: any) => {
+    // react-chartjs-2 ref directly gives us the Chart.js instance
+    const chart = chartRef.current;
+    if (!chart) {
+      console.warn('Chart not available in ref');
+      return;
+    }
+
+    // Default Chart.js legend click behavior (toggle visibility)
+    const index = legendItem.datasetIndex;
+    const meta = chart.getDatasetMeta(index);
+    meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+
+    chart.update();
+
+    // Notify parent after the chart updates
+    if (onVisibilityChange) {
+      setTimeout(() => {
+        const visibleDatasets = getVisibleDatasets(chart);
+        console.log('Visibility change detected, visible datasets:', visibleDatasets.length);
+        onVisibilityChange(visibleDatasets);
+      }, 100);
+    }
+  };
+
   return (
     <div>
       {data ? (
         <Line
+          ref={chartRef}
           data={{
             datasets: data.map(graphData => ({
               label: graphData.label,
@@ -45,6 +82,7 @@ const LineGraph: React.FC<Props> = ({ data, minDate, maxDate, title, xAxisLabel,
                   boxWidth: 15,
                   usePointStyle: true,
                 },
+                onClick: handleLegendClick,
               },
               title: {
                 display: true,

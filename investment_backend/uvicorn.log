@@ -1,0 +1,14 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1784462015.471988   27254 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: SSE3 SSE4.1 SSE4.2 AVX AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+INFO:     Started server process [27254]
+INFO:     Waiting for application startup.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Added job "Daily Unit Price Fetch" to job store "default"
+INFO:apscheduler.scheduler:Added job "Monthly Factsheet Fetch" to job store "default"
+INFO:apscheduler.scheduler:Scheduler started
+INFO:price_scraper:📅 Price scheduler started — daily fetch at 11:30 SAST, factsheets on 20th
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:3337 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51172 - "GET /health HTTP/1.1" 200 OK

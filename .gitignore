@@ -4,15 +4,24 @@ investment_backend/*.png
 investment_backend/*.jpg
 investment_backend/__pycache__/
 investment_backend/.venv/
+investment_backend/*.log
+investment_backend/*.pid
+investment_backend/factsheets/
 *.pyc
+core
+*.core
 
 ## Ignore frontend-generated files
 investment_frontend/node_modules
 investment_frontend/.next
 investment_frontend/.turbo
 investment_frontend/.vercel
+investment_frontend/core
+investment_frontend/*.log
+investment_frontend/*.pid
 
-# System / editor
+# System / editor / graphify
 .env
 .DS_Store
 .vscode/
+graphify-out/

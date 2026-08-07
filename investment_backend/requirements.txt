@@ -9,3 +9,32 @@ pandas
 yfinance
 matplotlib
 reportlab
+scikit-learn
+statsmodels
+scipy
+seaborn
+xgboost
+lightgbm
+catboost
+ta
+joblib
+plotly
+apscheduler
+requests-cache
+pmdarima
+openpyxl
+numpy-financial
+pytz
+pillow
+playwright
+# -----------------------------------------------------------------------
+# TensorFlow / Keras — installed via paru on Arch Linux (localhost).
+# For Docker (python:3.12-slim base), pip is used instead of paru.
+# Using tensorflow-cpu to avoid requiring CUDA in the container.
+# -----------------------------------------------------------------------
+tensorflow-cpu>=2.16.0
+keras>=3.0.0
+openpyxl
+numpy-financial
+playwright
+

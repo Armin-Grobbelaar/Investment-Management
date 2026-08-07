@@ -15,12 +15,15 @@ interface PieChartData {
   }
 
 interface Props {
-    data: PieChartData;
+    data: PieChartData | null;
     title?: string;
     theme?: 'light' | 'dark'; 
 }
 
 const PieChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
+    if (!data || !data.labels || data.labels.length === 0) {
+        return null;
+    }
     const options = {
         plugins: {
             legend: {
