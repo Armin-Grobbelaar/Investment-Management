@@ -101,11 +101,24 @@ def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension
     try:
         cagr_val = float(data.get("cagr_trend", [])[-1]["value"])
         mu = cagr_val / 100.0
-    except:
+    except Exception:
         mu = 0.10
         
-    # Volatility: use historical std of monthly returns if available, else 15%
-    sigma = 0.15
+    # 5. Infer sigma (annualised volatility) from monthly return variance
+    try:
+        # Build a list of monthly total returns (ratio, e.g. 0.01 = 1%)
+        cagr_series = data.get("portfolio_performance_return", [])
+        if len(cagr_series) >= 6:
+            returns = [float(d.get("value", 0)) / 100.0 for d in cagr_series[-12:]]
+            if returns:
+                sigma = float(np.std(returns, ddof=1)) * np.sqrt(12)  # annualise
+                sigma = max(sigma, 0.05)  # floor at 5% to avoid unrealistic values
+    except Exception:
+        sigma = 0.15
+    
+    # Final fallback if nothing computed
+    if 'sigma' not in dir() or sigma is None or sigma <= 0:
+        sigma = 0.15
     
     return run_gbm_monte_carlo(
         initial_value=current_value,

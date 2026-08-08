@@ -34,6 +34,8 @@ ChartJS.register(
     Title, ChartTooltip, Legend, Filler, ArcElement, BarElement
 );
 
+const DB_NAME = process.env.NEXT_PUBLIC_DB_NAME || 'Investments';
+
 // ── Colour palette ──────────────────────────────────────────────────────────
 const PALETTE = [
     "#007FFF","#00C853","#FF6B35","#FFB700","#9C27B0",
@@ -97,7 +99,7 @@ export default function NetWorthTracker() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get("/api/net_worth/Investments?base_currency=ZAR");
+                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=ZAR`);
                 setData(res.data);
             } catch (err: any) {
                 setError(err.message || "Failed to load net worth data");

@@ -65,7 +65,7 @@ MONTE_CARLO_SEED = int(os.environ.get("MONTE_CARLO_SEED", "42"))
 
 def calculate_pmt(principal: float, annual_rate: float, term_years: int) -> float:
     """Calculate monthly bond repayment using standard PMT formula."""
-    if principal <= 0 or annual_rate <= 0 or term_years <= 0:
+    if principal <= 0 or term_years <= 0 or annual_rate < 0:
         return 0.0
     r = (annual_rate / 100.0) / 12.0
     n = term_years * 12

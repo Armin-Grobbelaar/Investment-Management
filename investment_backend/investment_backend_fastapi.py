@@ -3,7 +3,7 @@ from investment_database_functions import (
     get_db_connection, get_investment_summary_display, get_portfolio_total_value,
     get_currencies_in_portfolio, get_investment_types_in_portfolio,
     get_all_investment_values, get_investment_data,
-    get_investment_summary, import_unit_prices_api, create_connection, add_investment,
+    get_investment_summary, import_unit_prices_api, create_connection, add_investment, add_user,
     get_edit_data_tables, get_edit_data_table, update_edit_data_table,
     add_edit_data_row, delete_edit_data_row, get_net_worth_timeseries
 )
@@ -25,23 +25,25 @@ from modules.factsheet_downloader import (
     get_factsheet_path
 )
 from modules.price_scraper import fetch_prices_now, get_backfill_status
+from modules.database import get_config_value, get_all_config, invalidate_config_cache
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi import FastAPI, Response, BackgroundTasks, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from functools import lru_cache
 from datetime import datetime, timedelta, date
 import json
 import pandas as pd
 import os
 import tempfile
 import logging
-# import io
 
 # Logger for the backend
 logger = logging.getLogger("investment_backend")
 logging.basicConfig(level=logging.INFO)
+
+# Process start time — used by the /health endpoint to report real uptime
+_APP_START_TIME = datetime.now()
 
 # Default database name from environment
 DEFAULT_DB = os.getenv("INVESTMENTS_DB", "Investments")
@@ -200,7 +202,7 @@ origins = [
 
 investment_api.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -460,7 +462,7 @@ async def import_unit_prices(
             temp_file.write(file_content)
 
         # Call the existing function
-        import_unit_prices_api(file_name, investment_name, "USD")
+        import_unit_prices_api(file_name, investment_name)
 
         return {"message": "Unit prices imported successfully", "investment_name": investment_name}
     except Exception as e:
@@ -492,7 +494,7 @@ async def import_investment_data(
 
         elif data_type == 'unit_prices':
             # Use existing unit prices function
-            import_unit_prices_api(temp_file_name, investment_name, "USD")
+            import_unit_prices_api(temp_file_name, investment_name)
             message = f"Unit prices imported successfully for {investment_name}"
 
         elif data_type == 'transactions':
@@ -626,8 +628,45 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "cache_entries": len(_cache_data),
-        "uptime_seconds": (datetime.now() - datetime.strptime("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")).total_seconds()
+        "uptime_seconds": (datetime.now() - _APP_START_TIME).total_seconds()
     }
+
+@investment_api.get("/config/{database_name}")
+async def config_get(database_name: str = "Investments"):
+    """Return all editable configuration settings from the configuration table."""
+    try:
+        config = get_all_config(database_name)
+        return config
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch config: {str(e)}")
+
+
+@investment_api.put("/config/{database_name}")
+async def config_update(request: Request, database_name: str = "Investments"):
+    """Update one or more configuration settings.
+
+    Body: {"setting_key": "new_value", ...}. Invalidates the in-memory cache.
+    """
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or not body:
+            raise HTTPException(status_code=400, detail="Request body must be a non-empty JSON object of {setting_key: value}")
+
+        with get_db_connection(database_name) as (conn, cursor):
+            for key, value in body.items():
+                cursor.execute(
+                    "UPDATE configuration SET setting_value = %s, updated_at = CURRENT_TIMESTAMP WHERE setting_key = %s",
+                    (str(value), key)
+                )
+            conn.commit()
+
+        invalidate_config_cache(database_name)
+        return {"message": f"Updated {len(body)} configuration setting(s)", "updated": list(body.keys())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update config: {str(e)}")
+
 
 @investment_api.get("/edit_data/table/{database_name}/{table_name}")
 async def get_table_data(database_name: str, table_name: str, skip: int = 0, limit: int = 100, search: str = None):
@@ -999,7 +1038,7 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 "id": int(row["id"]),
                 "investment_name": row["investment_name"],
                 "investment_type": row["investment_type"],
-                "unit_currency": base_currency,
+                "unit_currency": row.get("unit_currency", base_currency),
                 "investment_value_in_native_currency": round(row.get("investment_value", 0), 2),
                 "unit_price_in_native_currency": round(row.get("unit_price", 0), 2),
                 "total_units_held": float(row["total_units_held"]),
@@ -1007,7 +1046,7 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 "initial_investment_date": formatted_date
             })
 
-                # Generate key metrics for portfolio dashboard tiles
+        # Generate key metrics for portfolio dashboard tiles
         # Calculate total contributions from actual buy transaction data in the database
         try:
             with get_db_connection(database_name) as (conn, cursor):
@@ -1053,14 +1092,14 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
             {
                 "metric": "Total Net Worth",
                 "value": round(total_individual, 2),
-                "unit": "ZAR",
-                "formatted_value": f"R{round(total_individual, 2):,.2f}"
+                "unit": base_currency,
+                "formatted_value": f"{base_currency} {round(total_individual, 2):,.2f}"
             },
             {
                 "metric": "Total Contributions",
                 "value": round(total_contributions, 2),
-                "unit": "ZAR",
-                "formatted_value": f"R{round(total_contributions, 2):,.2f}"
+                "unit": base_currency,
+                "formatted_value": f"{base_currency} {round(total_contributions, 2):,.2f}"
             },
             {
                 "metric": "Total Investment Time",
@@ -1650,7 +1689,7 @@ async def get_net_worth(database_name: str = "Investments", base_currency: str =
         
         return {
             "total_net_worth": round(total_net_worth, 2),
-            "total_net_worth_formatted": f"R{round(total_net_worth, 2):,.2f}",
+            "total_net_worth_formatted": f"{base_currency} {round(total_net_worth, 2):,.2f}",
             "by_type": by_type,
             "by_institution": by_institution,
             "by_currency": by_currency,
@@ -1704,6 +1743,19 @@ async def prices_fetch_now_endpoint(database_name: str = "Investments", investme
 # ─────────────────────────────────────────────────────────────────────────────
 # Metrics Endpoints (Real Data)
 # ─────────────────────────────────────────────────────────────────────────────
+
+@investment_api.get("/investment_comparison/{database_name}")
+async def get_investment_comparison(database_name: str):
+    """
+    Compare metrics for the same asset held in more than one account
+    (e.g. a fund in a brokerage account and in a tax-free account).
+    """
+    try:
+        from modules.comparison import get_investment_comparison
+        return get_investment_comparison(database_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @investment_api.get("/investment_metrics/{database_name}")
 async def get_investment_metrics(database_name: str, base_currency: str = "ZAR", filter: str = "portfolio"):
@@ -1805,7 +1857,7 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                 
                 risk_metrics.append({
                     "period": date_str,
-                    "value": round(abs(ret_pct) * 0.15, 3),
+                    "value": round(abs(ret_pct) * VOLATILITY_BASELINE_PORTFOLIO, 3),
                     "index": idx
                 })
                 
@@ -1833,15 +1885,15 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
             investment_count = int(latest[10] or 0)
             
             key_metrics = [
-                {"metric": "Total Value", "value": round(total_current_value, 2), "unit": "ZAR", "formatted_value": f"R{round(total_current_value, 2):,.2f}"},
-                {"metric": "Total Contributions", "value": round(total_contributions, 2), "unit": "ZAR", "formatted_value": f"R{round(total_contributions, 2):,.2f}"},
+                {"metric": "Total Value", "value": round(total_current_value, 2), "unit": base_currency, "formatted_value": f"{base_currency} {round(total_current_value, 2):,.2f}"},
+                {"metric": "Total Contributions", "value": round(total_contributions, 2), "unit": base_currency, "formatted_value": f"{base_currency} {round(total_contributions, 2):,.2f}"},
                 {"metric": "Total Return %", "value": round(total_return_pct, 2), "unit": "%", "formatted_value": f"{round(total_return_pct, 2):.2f}%"},
                 {"metric": "CAGR", "value": round(float(latest[5] or 0) * 100, 2), "unit": "%", "formatted_value": f"{round(float(latest[5] or 0) * 100, 2):.2f}%"},
                 {"metric": "IRR", "value": round(float(latest[6] or 0) * 100, 2), "unit": "%", "formatted_value": f"{round(float(latest[6] or 0) * 100, 2):.2f}%"},
                 {"metric": "Active Investments", "value": investment_count, "unit": "count", "formatted_value": str(investment_count)}
             ]
             
-            conclusion = f"Portfolio performance: Total value R{total_current_value:,.2f}, total contributions R{total_contributions:,.2f}, net growth R{total_return_amount:,.2f}."
+            conclusion = f"Portfolio performance: Total value {base_currency} {total_current_value:,.2f}, total contributions {base_currency} {total_contributions:,.2f}, net growth {base_currency} {total_return_amount:,.2f}."
             
             fee_analysis = []
             tax_analysis = []

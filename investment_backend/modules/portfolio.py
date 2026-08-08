@@ -19,7 +19,7 @@ def _get_exchange_rate_for_portfolio(cursor, from_currency, to_currency, target_
     try:
         # Use the existing exchange rate function
         return get_exchange_rate(from_currency, to_currency, target_date, database_name)
-    except:
+    except Exception:
         # Fallback: Try to use current forex data
         try:
             ticker = f"{from_currency}{to_currency}=X"
@@ -30,14 +30,14 @@ def _get_exchange_rate_for_portfolio(cursor, from_currency, to_currency, target_
             
             cursor.execute("""
                 SELECT unit_price FROM investments i
-                JOIN unit_prices up ON i.id = up.investment_id
+                JOIN v_investment_prices up ON i.id = up.investment_id
                 WHERE i.investment_ticker = %s
                 ORDER BY up.unit_price_date DESC LIMIT 1
             """, (ticker,))
             result = cursor.fetchone()
             if result:
                 return float(result[0])
-        except:
+        except Exception:
             pass
     
     # Ultimate fallback
@@ -231,7 +231,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
             # Get all unique dates where we have unit prices
             cursor.execute("""
                 SELECT DISTINCT unit_price_date
-                FROM unit_prices up
+                FROM v_investment_prices up
                 JOIN investments i ON up.investment_id = i.id
                 WHERE i.investment_ticker != %s
                 ORDER BY unit_price_date
@@ -250,7 +250,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
                         # Get unit price for this date or closest previous
                         cursor.execute("""
                             SELECT unit_price
-                            FROM unit_prices
+                            FROM v_investment_prices
                             WHERE investment_id = %s AND unit_price_date <= %s
                             ORDER BY unit_price_date DESC
                             LIMIT 1

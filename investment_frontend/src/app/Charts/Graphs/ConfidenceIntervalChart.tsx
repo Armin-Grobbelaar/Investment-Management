@@ -162,7 +162,7 @@ const ConfidenceIntervalChart: React.FC<Props> = ({ data, title, theme = 'light'
 
             // Format as currency
             if (typeof value === 'number') {
-              label += `: $${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+              label += `: R${value.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`;
             }
 
             // Add confidence info for prediction line
@@ -170,7 +170,7 @@ const ConfidenceIntervalChart: React.FC<Props> = ({ data, title, theme = 'light'
               const upper = data.upperBound[context.dataIndex].y;
               const lower = data.lowerBound[context.dataIndex].y;
               const range = upper - lower;
-              const confInfo = `\nRange: $${lower.toLocaleString('en-US', { maximumFractionDigits: 0 })} - $${upper.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+              const confInfo = `\nRange: R${lower.toLocaleString('en-ZA', { maximumFractionDigits: 0 })} - R${upper.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`;
               label += confInfo;
             }
 
@@ -195,10 +195,10 @@ const ConfidenceIntervalChart: React.FC<Props> = ({ data, title, theme = 'light'
         display: true,
         title: {
           display: true,
-          text: 'Price ($)',
+          text: 'Price (R)',
         },
         ticks: {
-          callback: (value: any) => `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
+          callback: (value: any) => `R${Number(value).toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`,
         }
       },
     },
