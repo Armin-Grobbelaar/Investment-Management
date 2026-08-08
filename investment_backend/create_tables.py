@@ -40,7 +40,8 @@ def create_tables(db_name):
             investment_fee float8 NOT NULL,
             investment_status VARCHAR(20) NOT NULL,
             investment_subtype VARCHAR(50),
-            source_account VARCHAR(100)
+            source_account VARCHAR(100),
+            price_source_investment_id BIGINT REFERENCES investments(id)
         )""")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS unit_prices (
@@ -259,7 +260,21 @@ def create_tables(db_name):
             ('report_timezone', 'Africa/Johannesburg', 'Timezone for report timestamps and scheduling', 'reporting', true),
             ('chart_theme', 'default', 'Color theme for charts (default, dark, colorful)', 'display', true),
             ('performance_calculation_method', 'time_weighted', 'Method for calculating portfolio returns (time_weighted, money_weighted)', 'calculation', true),
-            ('max_chart_period_days', '3650', 'Maximum days to show in historical charts (default 10 years)', 'display', true)
+            ('max_chart_period_days', '3650', 'Maximum days to show in historical charts (default 10 years)', 'display', true),
+            ('cgt_inclusion_rate', '0.40', 'Capital Gains Tax inclusion rate for individuals (fraction)', 'tax', true),
+            ('cgt_marginal_tax_rate', '0.45', 'Assumed marginal income tax rate for CGT calc (fraction)', 'tax', true),
+            ('cgt_annual_exclusion', '40000', 'Annual CGT exclusion for individuals (in base currency)', 'tax', true),
+            ('default_projection_years', '20', 'Default property projection horizon in years', 'property', true),
+            ('monte_carlo_simulations', '1000', 'Default number of Monte Carlo simulations', 'property', true),
+            ('default_bond_interest_rate', '11.75', 'Default property bond interest rate (percent)', 'property', true),
+            ('default_rental_growth_rate', '5.0', 'Default annual rental growth rate (percent)', 'property', true),
+            ('default_vacancy_rate', '5.0', 'Default vacancy rate (percent)', 'property', true),
+            ('default_property_growth_rate', '7.0', 'Default annual property value growth (percent)', 'property', true),
+            ('default_inflation_rate', '5.0', 'Default long-term inflation rate (percent)', 'property', true),
+            ('scheduler_daily_hour', '11', 'Hour (SAST) for daily price fetch scheduler', 'automation', true),
+            ('scheduler_daily_minute', '30', 'Minute for daily price fetch scheduler', 'automation', true),
+            ('scheduler_factsheet_day', '20', 'Day of month for monthly factsheet download', 'automation', true),
+            ('prediction_horizon_days', '30', 'Default prediction horizon in days', 'predictions', true)
         ON CONFLICT (setting_key) DO NOTHING
         """)
 
@@ -385,6 +400,27 @@ def create_tables(db_name):
             password_hash VARCHAR(200) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+
+    # Shared-price support: investments holding the same asset in different
+    # accounts can point at a single "price master" investment via
+    # investments.price_source_investment_id.  The view below resolves each
+    # investment's effective price series (its own unit_prices rows, or its
+    # master's), so calculations only ever see one copy of the price history.
+    if db_name == INVESTMENTS_DB:
+        cursor.execute("""
+            CREATE OR REPLACE VIEW v_investment_prices AS
+            SELECT up.investment_id AS investment_id,
+                   up.unit_price_date, up.unit_price,
+                   up.unit_price_change, up.percentage_unit_price_change
+            FROM unit_prices up
+            UNION ALL
+            SELECT i.id AS investment_id,
+                   up.unit_price_date, up.unit_price,
+                   up.unit_price_change, up.percentage_unit_price_change
+            FROM investments i
+            JOIN unit_prices up ON up.investment_id = i.price_source_investment_id
+            WHERE i.price_source_investment_id IS NOT NULL
+        """)
 
     conn.commit()
     cursor.close()

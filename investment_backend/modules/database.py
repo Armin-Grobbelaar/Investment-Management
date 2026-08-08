@@ -58,7 +58,12 @@ def add_user(name, surname):
     database_connection.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     database_cursor = database_connection.cursor()
     
-    database_name = name.lower() + "_investment_database"
+    import re
+    # Sanitize: only allow lowercase alphanumeric + underscores in the identifier
+    sanitized_name = re.sub(r'[^a-z0-9_]', '_', name.lower())[:63]
+    database_name = sanitized_name + "_investment_database"
+    # psycopg2 cannot parameterise identifiers in CREATE DATABASE; use AsIs with the
+    # now-sanitised value (only [a-z0-9_] chars are present).
     database_cursor.execute("CREATE database %s", (AsIs(database_name), ))
     database_connection.commit()
     database_cursor.close()
@@ -102,3 +107,74 @@ def add_user(name, surname):
     
     investment_database_cursor.close()
     investment_database_connection.close()
+
+# ---------------------------------------------------------------------------
+# Configuration helpers — read from the `configuration` table
+# ---------------------------------------------------------------------------
+_config_cache: dict = {}
+_config_cache_expiry = None
+_CONFIG_CACHE_TTL = 300  # seconds
+
+def get_config_value(key: str, default=None, database_name: str = None):
+    """Read a single setting_value from the configuration table.
+    
+    Results are cached in-process for CONFIG_CACHE_TTL seconds to avoid
+    hammering the DB on every request.
+    """
+    import time
+    from datetime import datetime, timedelta
+
+    global _config_cache, _config_cache_expiry
+
+    db = database_name or DEFAULT_DB
+
+    now = time.time()
+    if _config_cache_expiry and now < _config_cache_expiry and db in _config_cache:
+        return _config_cache[db].get(key, default)
+
+    # Rebuild cache from DB
+    try:
+        with get_db_connection(db) as (conn, cursor):
+            cursor.execute("SELECT setting_key, setting_value FROM configuration")
+            cache = {row[0]: row[1] for row in cursor.fetchall()}
+        _config_cache[db] = cache
+        _config_cache_expiry = now + _CONFIG_CACHE_TTL
+    except Exception:
+        # If table doesn't exist yet or DB error, return default silently
+        return default
+
+    return _config_cache.get(db, {}).get(key, default)
+
+
+def get_all_config(database_name: str = None) -> dict:
+    """Return the full configuration dict from the configuration table."""
+    db = database_name or DEFAULT_DB
+    import time
+
+    global _config_cache, _config_cache_expiry
+    now = time.time()
+
+    if _config_cache_expiry and now < _config_cache_expiry and db in _config_cache:
+        return dict(_config_cache[db])
+
+    try:
+        with get_db_connection(db) as (conn, cursor):
+            cursor.execute(
+                "SELECT setting_key, setting_value, setting_description, setting_category "
+                "FROM configuration ORDER BY setting_category, setting_key"
+            )
+            cache = {}
+            for row in cursor.fetchall():
+                cache[row[0]] = row[1]  # key -> value
+            _config_cache[db] = cache
+            _config_cache_expiry = now + _CONFIG_CACHE_TTL
+            return dict(cache)
+    except Exception:
+        return {}
+
+
+def invalidate_config_cache(database_name: str = None):
+    """Clear the in-memory config cache (call after config is updated)."""
+    global _config_cache, _config_cache_expiry
+    _config_cache = {}
+    _config_cache_expiry = None
