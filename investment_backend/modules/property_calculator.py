@@ -6,6 +6,19 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
+from .database import get_config_value
+
+
+def _cfg(env_key: str, table_key: str, default: str) -> str:
+    """Resolve a default: environment variable first, then the configuration
+    table, then the built-in fallback. Values are read once at import time, so
+    configuration-table changes take effect on the next restart."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        return env_val
+    return get_config_value(table_key, default)
+
+
 # SA Transfer Duty brackets (2024/25 tax year) - configurable via environment
 TRANSFER_DUTY_BRACKETS = [
     {
@@ -51,12 +64,19 @@ TRANSFER_DUTY_BRACKETS = [
     }
 ]
 
-# Capital Gains Tax defaults - configurable via environment
-DEFAULT_CGT_INCLUSION_RATE = float(os.environ.get("CGT_INCLUSION_RATE", "0.40"))
-DEFAULT_CGT_MARGINAL_TAX_RATE = float(os.environ.get("CGT_MARGINAL_TAX_RATE", "0.45"))
-DEFAULT_CGT_ANNUAL_EXCLUSION = float(os.environ.get("CGT_ANNUAL_EXCLUSION", "40000"))
-DEFAULT_PROJECTION_YEARS = int(os.environ.get("PROPERTY_PROJECTION_YEARS", "20"))
-DEFAULT_MONTE_CARLO_SIMULATIONS = int(os.environ.get("MONTE_CARLO_SIMULATIONS", "1000"))
+# Capital Gains Tax defaults — resolved from the configuration table with
+# environment-variable override, then a built-in fallback (see _cfg).
+DEFAULT_CGT_INCLUSION_RATE = float(_cfg("CGT_INCLUSION_RATE", "cgt_inclusion_rate", "0.40"))
+DEFAULT_CGT_MARGINAL_TAX_RATE = float(_cfg("CGT_MARGINAL_TAX_RATE", "cgt_marginal_tax_rate", "0.45"))
+DEFAULT_CGT_ANNUAL_EXCLUSION = float(_cfg("CGT_ANNUAL_EXCLUSION", "cgt_annual_exclusion", "40000"))
+DEFAULT_CGT_PRIMARY_RESIDENCE_EXCLUSION = float(_cfg("CGT_PRIMARY_RESIDENCE_EXCLUSION", "cgt_primary_residence_exclusion", "2000000"))
+DEFAULT_PROJECTION_YEARS = int(_cfg("PROPERTY_PROJECTION_YEARS", "default_projection_years", "20"))
+DEFAULT_MONTE_CARLO_SIMULATIONS = int(_cfg("MONTE_CARLO_SIMULATIONS", "monte_carlo_simulations", "1000"))
+DEFAULT_BOND_INTEREST_RATE = float(_cfg("DEFAULT_BOND_INTEREST_RATE", "default_bond_interest_rate", "11.75"))
+DEFAULT_RENTAL_GROWTH_RATE = float(_cfg("DEFAULT_RENTAL_GROWTH_RATE", "default_rental_growth_rate", "5.0"))
+DEFAULT_VACANCY_RATE = float(_cfg("DEFAULT_VACANCY_RATE", "default_vacancy_rate", "5.0"))
+DEFAULT_PROPERTY_GROWTH_RATE = float(_cfg("DEFAULT_PROPERTY_GROWTH_RATE", "default_property_growth_rate", "7.0"))
+DEFAULT_INFLATION_RATE = float(_cfg("DEFAULT_INFLATION_RATE", "default_inflation_rate", "5.0"))
 # Standard deviations are in percentage points (matching the percentage-unit inputs)
 DEFAULT_PROPERTY_GROWTH_STD = float(os.environ.get("PROPERTY_GROWTH_STD", "2.5"))
 DEFAULT_RENTAL_GROWTH_STD = float(os.environ.get("RENTAL_GROWTH_STD", "2.0"))
@@ -100,17 +120,26 @@ def calculate_sa_transfer_duty(purchase_price: float) -> float:
     excess = purchase_price - last_bracket.get("excess_from", last_bracket["lower"])
     return last_bracket["base"] + excess * last_bracket["rate"]
 
-def calculate_cgt(proceeds: float, base_cost: float, inclusion_rate: float = DEFAULT_CGT_INCLUSION_RATE, marginal_tax_rate: float = DEFAULT_CGT_MARGINAL_TAX_RATE, annual_exclusion: float = DEFAULT_CGT_ANNUAL_EXCLUSION) -> dict:
-    """Calculate SA Capital Gains Tax on disposal"""
-    net_gain = max(0.0, proceeds - base_cost - annual_exclusion)
+def calculate_cgt(proceeds: float, base_cost: float, inclusion_rate: float = DEFAULT_CGT_INCLUSION_RATE, marginal_tax_rate: float = DEFAULT_CGT_MARGINAL_TAX_RATE, annual_exclusion: float = DEFAULT_CGT_ANNUAL_EXCLUSION, primary_residence_exclusion: float = 0.0) -> dict:
+    """Calculate SA Capital Gains Tax on disposal.
+
+    Exclusions are applied in order: the primary-residence exclusion
+    (R2m for a person's primary residence, only when the user confirms the
+    property is their primary residence) and then the individual's annual
+    exclusion. Passing 0.0 for primary_residence_exclusion (the default)
+    models a non-primary-residence disposal.
+    """
+    gain = max(0.0, proceeds - base_cost)
+    net_gain = max(0.0, gain - primary_residence_exclusion - annual_exclusion)
     taxable_gain = net_gain * inclusion_rate
     cgt_payable = taxable_gain * marginal_tax_rate
-    effective_rate = cgt_payable / (proceeds - base_cost) if proceeds > base_cost else 0
+    effective_rate = cgt_payable / gain if gain > 0 else 0
     return {
         "net_gain": float(net_gain),
         "taxable_gain": float(taxable_gain),
         "cgt_payable": float(cgt_payable),
-        "effective_rate": float(effective_rate)
+        "effective_rate": float(effective_rate),
+        "primary_residence_exclusion": float(primary_residence_exclusion)
     }
 
 def run_property_projection(
@@ -135,7 +164,8 @@ def run_property_projection(
     inflation_rate: float,
     projection_years: int = DEFAULT_PROJECTION_YEARS,
     cgt_inclusion_rate: float = DEFAULT_CGT_INCLUSION_RATE,
-    cgt_marginal_tax_rate: float = DEFAULT_CGT_MARGINAL_TAX_RATE
+    cgt_marginal_tax_rate: float = DEFAULT_CGT_MARGINAL_TAX_RATE,
+    is_primary_residence: bool = False
 ) -> dict:
     if transfer_duty is None or transfer_duty < 0:
         transfer_duty = calculate_sa_transfer_duty(purchase_price)
@@ -223,7 +253,13 @@ def run_property_projection(
         
         # Calculate CGT
         base_cost = total_acquisition_cost # Simplified
-        cgt = calculate_cgt(sell_value, base_cost, cgt_inclusion_rate, cgt_marginal_tax_rate)
+        cgt = calculate_cgt(
+            sell_value, base_cost,
+            cgt_inclusion_rate, cgt_marginal_tax_rate,
+            primary_residence_exclusion=(
+                DEFAULT_CGT_PRIMARY_RESIDENCE_EXCLUSION if is_primary_residence else 0.0
+            )
+        )
         
         net_sale_proceeds = sell_value - remaining - cgt["cgt_payable"]
         flows[-1] += net_sale_proceeds

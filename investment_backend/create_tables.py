@@ -264,6 +264,7 @@ def create_tables(db_name):
             ('cgt_inclusion_rate', '0.40', 'Capital Gains Tax inclusion rate for individuals (fraction)', 'tax', true),
             ('cgt_marginal_tax_rate', '0.45', 'Assumed marginal income tax rate for CGT calc (fraction)', 'tax', true),
             ('cgt_annual_exclusion', '40000', 'Annual CGT exclusion for individuals (in base currency)', 'tax', true),
+            ('cgt_primary_residence_exclusion', '2000000', 'CGT exclusion for the sale of a primary residence (in base currency)', 'tax', true),
             ('default_projection_years', '20', 'Default property projection horizon in years', 'property', true),
             ('monte_carlo_simulations', '1000', 'Default number of Monte Carlo simulations', 'property', true),
             ('default_bond_interest_rate', '11.75', 'Default property bond interest rate (percent)', 'property', true),

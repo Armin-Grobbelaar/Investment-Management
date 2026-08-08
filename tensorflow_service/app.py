@@ -10,6 +10,7 @@ container.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import List
 
@@ -52,7 +53,11 @@ def build_lstm_forecast(prices, dates, steps, confidence_level, volatility_multi
     the level from the last observed price, forecasts stay positive and bounded.
     """
     data = np.array(prices, dtype=np.float64).flatten()
-    last_observed = float(data[-1]) if len(data) else 0.0
+    # Zero/negative values (data glitches) are filtered out before the log
+    # transform. The forecast is anchored to the last *valid* positive price so
+    # the level reconstruction and the flat fallback use the same reference.
+    valid = data[data > 0]
+    last_observed = float(valid[-1]) if len(valid) else 0.0
     last_date = datetime.fromisoformat(dates[-1]) if dates else datetime.now()
     forecast_dates = [(last_date + timedelta(days=i + 1)).strftime('%Y-%m-%d') for i in range(steps)]
 
@@ -74,7 +79,6 @@ def build_lstm_forecast(prices, dates, steps, confidence_level, volatility_multi
         }
 
     # --- Stationary transform: log returns -------------------------------
-    valid = data[data > 0]
     if len(valid) < 40:
         return anchored_fallback()
     log_prices = np.log(valid)
@@ -191,8 +195,19 @@ def predict_lstm(request: LSTMPredictRequest):
     try:
         if len(request.data) < 30:
             raise HTTPException(status_code=400, detail="Need at least 30 historical data points")
+        # Bounds validation — prevents resource exhaustion (recursive predict
+        # runs once per step) and garbage confidence bounds.
+        if not 1 <= request.steps <= 365:
+            raise HTTPException(status_code=400, detail="steps must be between 1 and 365")
+        if not 0.5 < request.confidence_level < 1.0:
+            raise HTTPException(status_code=400, detail="confidence_level must be between 0.5 and 1.0 (exclusive)")
+        if request.volatility_multiplier < 0:
+            raise HTTPException(status_code=400, detail="volatility_multiplier must be non-negative")
+        prices = [p.price for p in request.data]
+        if any(not math.isfinite(p) for p in prices):
+            raise HTTPException(status_code=400, detail="prices must be finite numbers (NaN/Infinity not allowed)")
         result = build_lstm_forecast(
-            prices=[p.price for p in request.data],
+            prices=prices,
             dates=[p.date for p in request.data],
             steps=request.steps,
             confidence_level=request.confidence_level,
@@ -202,7 +217,7 @@ def predict_lstm(request: LSTMPredictRequest):
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+    except Exception:
         logger.exception("LSTM prediction failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal prediction error")

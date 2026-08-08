@@ -103,6 +103,32 @@ class TestCgt:
         assert r["taxable_gain"] == pytest.approx(8_000)
         assert r["cgt_payable"] == pytest.approx(3_600)
 
+    def test_primary_residence_exclusion_reduces_gain(self):
+        # Gain 3m. Without primary residence: 3m - 40k = 2.96m taxable base.
+        # With the R2m primary-residence exclusion: 3m - 2m - 40k = 960k.
+        without = calculate_cgt(proceeds=5_000_000, base_cost=2_000_000,
+                                inclusion_rate=0.40, marginal_tax_rate=0.45,
+                                annual_exclusion=40_000)
+        with_res = calculate_cgt(proceeds=5_000_000, base_cost=2_000_000,
+                                 inclusion_rate=0.40, marginal_tax_rate=0.45,
+                                 annual_exclusion=40_000,
+                                 primary_residence_exclusion=2_000_000)
+        assert without["net_gain"] == pytest.approx(2_960_000)
+        assert with_res["net_gain"] == pytest.approx(960_000)
+        assert with_res["cgt_payable"] == pytest.approx(0.4 * 0.45 * 960_000)
+        assert with_res["primary_residence_exclusion"] == pytest.approx(2_000_000)
+        # Exclusion is opt-in: the default must NOT apply it
+        assert without["primary_residence_exclusion"] == 0.0
+
+    def test_primary_residence_exclusion_never_negative(self):
+        # Primary-residence exclusion larger than the gain -> no CGT
+        r = calculate_cgt(proceeds=1_500_000, base_cost=1_000_000,
+                          inclusion_rate=0.40, marginal_tax_rate=0.45,
+                          annual_exclusion=40_000,
+                          primary_residence_exclusion=2_000_000)
+        assert r["net_gain"] == 0.0
+        assert r["cgt_payable"] == 0.0
+
 
 class TestRunPropertyProjection:
     def _full_inputs(self, **overrides):
@@ -160,3 +186,14 @@ class TestRunPropertyProjection:
             monthly_other_costs=0,
         ))
         assert res["first_year_gross_yield"] == pytest.approx(12.0)  # 120k / 1m
+
+    def test_primary_residence_reduces_cgt_in_projection(self):
+        """Tickbox flows through: the R2m primary-residence exclusion must cut
+        the year-20 CGT by inclusion_rate * marginal_rate * 2m."""
+        normal = run_property_projection(**self._full_inputs())
+        primary = run_property_projection(**self._full_inputs(is_primary_residence=True))
+        assert normal["cgt_20yr"] > 0
+        assert primary["cgt_20yr"] < normal["cgt_20yr"]
+        assert normal["cgt_20yr"] - primary["cgt_20yr"] == pytest.approx(0.40 * 0.45 * 2_000_000, abs=1.0)
+        # Lower CGT -> higher net sale proceeds -> higher IRR
+        assert primary["irr_20yr"] > normal["irr_20yr"]

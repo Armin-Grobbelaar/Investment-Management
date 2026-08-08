@@ -27,6 +27,14 @@ services:
       # Frontend environment
       NODE_ENV: production
       PORT: 3037
+      # NextAuth credentials (read from the gitignored root .env file).
+      # The old hardcoded Dave/nextauth credentials were removed for security.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3037}
+      GITHUB_ID: ${GITHUB_ID:-}
+      GITHUB_SECRET: ${GITHUB_SECRET:-}
     logging:
       driver: "json-file"
       options:

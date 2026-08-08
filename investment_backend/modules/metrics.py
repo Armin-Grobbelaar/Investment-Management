@@ -6,7 +6,6 @@ from datetime import datetime, date
 from .database import get_db_connection, DEFAULT_DB
 
 # Configuration constants - configurable via environment
-DAYS_IN_YEAR = float(os.environ.get("DAYS_IN_YEAR", "365.25"))
 CAGR_EXCELLENT_THRESHOLD = float(os.environ.get("CAGR_EXCELLENT_THRESHOLD", "0.15"))
 CAGR_GOOD_THRESHOLD = float(os.environ.get("CAGR_GOOD_THRESHOLD", "0.08"))
 CAGR_MODERATE_THRESHOLD = float(os.environ.get("CAGR_MODERATE_THRESHOLD", "0.0"))
@@ -45,10 +44,11 @@ def xirr(dates, amounts):
     def npv(rate):
         total = 0.0
         for d, a in zip(dates, amounts):
-            days = (d - start_date).days
             if rate <= -1:
                 return float('inf')
-            total += a / ((1 + rate) ** (days / 365.25))
+            # Actual/actual year fraction (leap years considered) — the same
+            # convention used for CAGR and inflation adjustment.
+            total += a / ((1 + rate) ** fractional_years_between(start_date, d))
         return total
 
     try:
@@ -59,6 +59,36 @@ def xirr(dates, amounts):
 def is_leap_year(year: int) -> bool:
     """Check whether a given year is a leap year."""
     return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+
+
+def fractional_years_between(start_date, end_date) -> float:
+    """Year fraction between two dates using the actual/actual convention.
+
+    Each calendar day counts as 1/(days in its calendar year), so leap years
+    (366 days) are taken into account: a period spanning 29 February is
+    weighted by 1/366 for that day and 1/365 for days in ordinary years.
+    This is the same per-year convention already used by adjust_value for
+    inflation and is consistent across XIRR and CAGR.
+    """
+    if start_date is None or end_date is None:
+        return 0.0
+    if hasattr(start_date, 'date'):  # datetime -> date
+        start_date = start_date.date()
+    if hasattr(end_date, 'date'):
+        end_date = end_date.date()
+    if end_date <= start_date:
+        return 0.0
+
+    total = 0.0
+    cursor = start_date
+    while cursor.year < end_date.year:
+        year_end = date(cursor.year, 12, 31)
+        days = (year_end - cursor).days + 1  # through 31 Dec inclusive
+        total += days / (366 if is_leap_year(cursor.year) else 365)
+        cursor = date(cursor.year + 1, 1, 1)
+    days = (end_date - cursor).days  # 1 Jan .. end-1 (end exclusive)
+    total += days / (366 if is_leap_year(cursor.year) else 365)
+    return total
 
 def adjust_value(value: float, date_obj, current_value_date, inflation_df: pd.DataFrame) -> float:
     """
@@ -278,7 +308,7 @@ def calculate_investment_metrics(
             if isinstance(start_date, str):
                 start_date = pd.to_datetime(start_date)
             
-            inv_period = (current_value_date - start_date).days / 365.25
+            inv_period = fractional_years_between(start_date, current_value_date)
             investment_metrics.loc[row_name, "investment period"] = inv_period
             
             net_growth = current_val - total_contrib

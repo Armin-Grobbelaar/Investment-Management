@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import {
     Container, Paper, Button, IconButton, Box, Typography, Grid, Card, CardContent,
-    TextField, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Table, TableBody, TableCell, TableHead, TableRow, TableContainer
+    TextField, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
+    FormControlLabel, Checkbox
 } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import { brandingDarkTheme, brandingLightTheme } from '../Themes/muiTheme';
@@ -49,13 +50,17 @@ export default function PropertyAnalysis() {
         monthly_management_fee_pct: 8,
         monthly_other_costs: 0,
         monthly_rental_income: 12000,
-        rental_growth_rate_pa: 0.05,
+        // Growth/inflation rates are percentages on the backend (e.g. 7.0 = 7%).
+        // Earlier defaults (0.04/0.05) were fraction-scale and produced
+        // ~0.05% growth instead of 5%.
+        rental_growth_rate_pa: 5.0,
         vacancy_rate_pct: 5,
-        property_growth_rate_pa: 0.04,
-        inflation_rate: 0.05,
+        property_growth_rate_pa: 7.0,
+        inflation_rate: 5.0,
         projection_years: 20,
         cgt_inclusion_rate: 0.40,
-        cgt_marginal_tax_rate: 0.45
+        cgt_marginal_tax_rate: 0.45,
+        is_primary_residence: false
     });
 
     const handleChange = (e: any) => {
@@ -64,6 +69,11 @@ export default function PropertyAnalysis() {
             ...prev,
             [name]: name === 'property_name' ? value : Number(value)
         }));
+    };
+
+    const handlePrimaryResidenceChange = (e: any) => {
+        const { checked } = e.target;
+        setInputs(prev => ({ ...prev, is_primary_residence: checked }));
     };
 
     const handleScrapeUrl = async () => {
@@ -223,6 +233,12 @@ export default function PropertyAnalysis() {
                                     <Grid size={6}><TextField fullWidth label="Levies" name="monthly_levy" type="number" value={inputs.monthly_levy} onChange={handleChange} /></Grid>
                                     <Grid size={6}><TextField fullWidth label="Rates" name="monthly_rates" type="number" value={inputs.monthly_rates} onChange={handleChange} /></Grid>
                                     <Grid size={6}><TextField fullWidth label="Maintenance/m" name="monthly_maintenance_reserve" type="number" value={inputs.monthly_maintenance_reserve} onChange={handleChange} /></Grid>
+                                    <Grid size={12}>
+                                        <FormControlLabel
+                                            control={<Checkbox checked={inputs.is_primary_residence} onChange={handlePrimaryResidenceChange} />}
+                                            label="This property is my primary residence (applies the R2m CGT exclusion on sale)"
+                                        />
+                                    </Grid>
                                     <Grid size={12}>
                                         <Button variant="contained" fullWidth size="large" onClick={handleCalculate} disabled={loading}>
                                             {loading ? <CircularProgress size={24} /> : "Calculate Analysis"}

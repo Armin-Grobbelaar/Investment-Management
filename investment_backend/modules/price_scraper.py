@@ -131,10 +131,24 @@ def _link_price_shares(database_name: str) -> int:
         for (source, currency, key), members in groups.items():
             if len(members) < 2:
                 continue
-            # Sorted by price_rows DESC, id ASC → first member is the master
-            master_id = members[0][0]
-            for inv_id, price_rows, current_master in members[1:]:
-                if current_master == master_id:
+            # The master must be an *unlinked* member with the most price rows
+            # (ties → lowest id). An already-linked member may have had its own
+            # price rows deleted, so making it the master would leave the whole
+            # group with no visible prices via v_investment_prices.
+            unlinked = [m for m in members if m[2] == 0]
+            pool = unlinked if unlinked else members
+            master_id = max(pool, key=lambda m: (m[1], -m[0]))[0]
+            for inv_id, price_rows, current_master in members:
+                if inv_id == master_id or current_master == master_id:
+                    continue
+                if current_master != 0:
+                    # Already linked to a different master. Re-pointing it
+                    # would DELETE its price rows, which may be the only copy
+                    # if the old master's rows are gone — leave it alone.
+                    logger.warning(
+                        f"⚠️ Investment {inv_id} is already linked to master {current_master}; "
+                        f"skipping re-link to {master_id} (would delete price history)."
+                    )
                     continue
                 cursor.execute(
                     "UPDATE investments SET price_source_investment_id = %s WHERE id = %s",
@@ -146,7 +160,8 @@ def _link_price_shares(database_name: str) -> int:
                 )
                 cursor.execute(
                     "UPDATE investments SET unit_price = "
-                    "(SELECT unit_price FROM investments WHERE id = %s) WHERE id = %s",
+                    "COALESCE((SELECT unit_price FROM investments WHERE id = %s), unit_price) "
+                    "WHERE id = %s",
                     (master_id, inv_id)
                 )
                 linked += 1
