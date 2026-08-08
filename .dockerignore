@@ -37,6 +37,8 @@ coverage.xml
 backend.log
 investment_frontend/tsconfig.tsbuildinfo
 investment_frontend/frontend.pid
+# Standalone TensorFlow API service (built separately by its own Dockerfile)
+tensorflow_service/
 
 # OS files
 .DS_Store

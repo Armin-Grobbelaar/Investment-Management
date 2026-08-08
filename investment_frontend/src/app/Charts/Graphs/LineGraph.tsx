@@ -14,6 +14,8 @@ interface LineGraphData {
   label: string;
   data: Point[];
   borderColour: string;
+  fill?: boolean | string;
+  borderDash?: number[];
 }
 
 interface Props {
@@ -23,6 +25,7 @@ interface Props {
   title?: string;
   xAxisLabel?: string;
   yAxisLabel?: string;
+  theme?: string;
   onVisibilityChange?: (visibleDatasets: LineGraphData[]) => void;
 }
 

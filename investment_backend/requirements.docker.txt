@@ -1,0 +1,32 @@
+# Docker-specific requirements — TensorFlow/Keras are excluded here.
+# The backend connects to the host's tensorflow container via
+# the TENSORFLOW_SERVER_URL environment variable instead.
+fastapi
+uvicorn[standard]
+pydantic
+psycopg2-binary
+sqlalchemy
+requests
+numpy
+pandas
+yfinance
+matplotlib
+reportlab
+scikit-learn
+statsmodels
+scipy
+seaborn
+xgboost
+lightgbm
+catboost
+ta
+joblib
+plotly
+apscheduler
+requests-cache
+pmdarima
+openpyxl
+numpy-financial
+pytz
+pillow
+playwright
