@@ -60,6 +60,31 @@ class TestDatabaseConnection:
         assert mock_connection.commit.call_count >= 1
         assert mock_connection.close.call_count == 3
 
+    @patch('modules.database.psycopg2.connect')
+    def test_add_user_sanitizes_identifier(self, mock_connect):
+        """Malicious characters in a username must not reach CREATE DATABASE."""
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_connection
+
+        from modules.database import add_user, AsIs
+        add_user("bobby'; DROP TABLE users;--", "Hacker")
+
+        # Find the CREATE DATABASE statement
+        create_calls = [
+            c for c in mock_cursor.execute.call_args_list
+            if c.args and "CREATE database" in str(c.args[0])
+        ]
+        assert create_calls, "CREATE DATABASE was never executed"
+
+        sql, params = create_calls[0].args
+        db_identifier = str(params[0])
+        # Only [a-z0-9_] allowed in the identifier
+        assert db_identifier == "bobby___drop_table_users____investment_database"
+        assert all(ch.isalnum() or ch == "_" for ch in db_identifier)
+
+
 
 class TestDatabaseConstants:
     """Test database constants are properly configured."""
