@@ -9,9 +9,8 @@ import type { NextRequest } from 'next/server';
  * The old rewrite (`source: '/api/:path*'`) matched `/api/auth/*` too and
  * forwarded it to the backend, which returned 404 — breaking sign-in.
  */
-const BACKEND_ORIGIN = 'http://127.0.0.1:3337';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     // NextAuth routes are handled by the Next.js route handler, not the backend.
