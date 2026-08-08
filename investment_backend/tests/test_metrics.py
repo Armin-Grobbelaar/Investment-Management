@@ -10,10 +10,53 @@ from unittest.mock import patch, MagicMock
 
 from modules.metrics import (
     xirr, is_leap_year, adjust_value, adjust_for_inflation,
+    fractional_years_between,
     calculate_investment_metrics, update_investment_metrics,
     recalculate_investment_metrics_history, get_investment_metrics_data,
     get_investment_metrics_by_name_data
 )
+
+
+class TestDayCountConvention:
+    """Actual/actual year fraction — leap years (366) vs normal years (365)."""
+
+    def test_full_leap_year_is_one(self):
+        assert fractional_years_between(date(2020, 1, 1), date(2021, 1, 1)) == pytest.approx(1.0)
+
+    def test_full_normal_year_is_one(self):
+        assert fractional_years_between(date(2021, 1, 1), date(2022, 1, 1)) == pytest.approx(1.0)
+
+    def test_two_years_spanning_leap_day(self):
+        # 2019 (365) + 2020 (366) = 2.0
+        assert fractional_years_between(date(2019, 1, 1), date(2021, 1, 1)) == pytest.approx(2.0)
+
+    def test_leap_year_half_year_uses_366_denominator(self):
+        # 182 days inside leap year 2020 -> 182/366
+        assert fractional_years_between(date(2020, 1, 1), date(2020, 7, 1)) == pytest.approx(182 / 366)
+
+    def test_normal_year_half_year_uses_365_denominator(self):
+        # 181 days inside normal year 2021 -> 181/365
+        assert fractional_years_between(date(2021, 1, 1), date(2021, 7, 1)) == pytest.approx(181 / 365)
+
+    def test_same_date_is_zero(self):
+        assert fractional_years_between(date(2024, 3, 1), date(2024, 3, 1)) == 0.0
+
+    def test_reversed_dates_is_zero(self):
+        assert fractional_years_between(date(2024, 3, 1), date(2024, 1, 1)) == 0.0
+
+    def test_none_inputs_are_zero(self):
+        assert fractional_years_between(None, date(2024, 1, 1)) == 0.0
+        assert fractional_years_between(date(2024, 1, 1), None) == 0.0
+
+    def test_datetime_inputs_accepted(self):
+        assert fractional_years_between(datetime(2020, 1, 1), datetime(2021, 1, 1)) == pytest.approx(1.0)
+
+    def test_century_rule(self):
+        # 1900 is NOT a leap year (divisible by 100 but not 400)
+        assert is_leap_year(1900) is False
+        # 2000 IS a leap year (divisible by 400)
+        assert is_leap_year(2000) is True
+        assert fractional_years_between(date(1900, 1, 1), date(1901, 1, 1)) == pytest.approx(1.0)
 
 
 class TestFinancialCalculations:

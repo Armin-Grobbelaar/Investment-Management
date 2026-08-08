@@ -16,7 +16,9 @@ from modules.predictions import (
 )
 from modules.property_calculator import (
     run_property_projection, run_sensitivity_analysis, run_property_monte_carlo,
-    calculate_pmt, calculate_sa_transfer_duty
+    calculate_pmt, calculate_sa_transfer_duty,
+    DEFAULT_BOND_INTEREST_RATE, DEFAULT_RENTAL_GROWTH_RATE, DEFAULT_VACANCY_RATE,
+    DEFAULT_PROPERTY_GROWTH_RATE, DEFAULT_INFLATION_RATE
 )
 from modules.property_scraper import scrape_property_url
 from modules.property_reporting import generate_property_pdf_report
@@ -1064,8 +1066,9 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 cursor.execute("SELECT MIN(initial_investment_date) FROM investments WHERE number_of_units_held > 0")
                 result = cursor.fetchone()
                 if result and result[0]:
+                    from modules.metrics import fractional_years_between
                     earliest_investment = pd.Timestamp(result[0])
-                    total_investment_time = max((pd.Timestamp.now() - earliest_investment).days / 365.25, 0.1)
+                    total_investment_time = max(fractional_years_between(earliest_investment, pd.Timestamp.now()), 0.1)
                 else:
                     total_investment_time = FALLBACK_INVESTMENT_TIME_YEARS
         except Exception:
@@ -1289,7 +1292,7 @@ async def property_calculate(request: Request, database_name: str = "Investments
             bond_registration_costs=float(body.get("bond_registration_costs", 0)),
             other_acquisition_costs=float(body.get("other_acquisition_costs", 0)),
             deposit_amount=float(body.get("deposit_amount", 0)),
-            bond_interest_rate=float(body.get("bond_interest_rate", 0)),
+            bond_interest_rate=float(body.get("bond_interest_rate", DEFAULT_BOND_INTEREST_RATE)),
             bond_term_years=int(body.get("bond_term_years", 20)),
             monthly_levy=float(body.get("monthly_levy", 0)),
             monthly_rates=float(body.get("monthly_rates", 0)),
@@ -1304,7 +1307,8 @@ async def property_calculate(request: Request, database_name: str = "Investments
             inflation_rate=float(body.get("inflation_rate", 0)),
             projection_years=int(body.get("projection_years", 20)),
             cgt_inclusion_rate=float(body.get("cgt_inclusion_rate", 0.40)),
-            cgt_marginal_tax_rate=float(body.get("cgt_marginal_tax_rate", 0.45))
+            cgt_marginal_tax_rate=float(body.get("cgt_marginal_tax_rate", 0.45)),
+            is_primary_residence=bool(body.get("is_primary_residence", False))
         )
         return result
     except Exception as e:
@@ -1323,7 +1327,7 @@ async def property_monte_carlo(request: Request, database_name: str = "Investmen
             "bond_registration_costs": float(body.get("bond_registration_costs", 0)),
             "other_acquisition_costs": float(body.get("other_acquisition_costs", 0)),
             "deposit_amount": float(body.get("deposit_amount", 150000)),
-            "bond_interest_rate": float(body.get("bond_interest_rate", 11.75)),
+            "bond_interest_rate": float(body.get("bond_interest_rate", DEFAULT_BOND_INTEREST_RATE)),
             "bond_term_years": int(body.get("bond_term_years", 20)),
             "monthly_levy": float(body.get("monthly_levy", 1500)),
             "monthly_rates": float(body.get("monthly_rates", 800)),
@@ -1332,13 +1336,14 @@ async def property_monte_carlo(request: Request, database_name: str = "Investmen
             "monthly_management_fee_pct": float(body.get("monthly_management_fee_pct", 8)),
             "monthly_other_costs": float(body.get("monthly_other_costs", 0)),
             "monthly_rental_income": float(body.get("monthly_rental_income", 12000)),
-            "rental_growth_rate_pa": float(body.get("rental_growth_rate_pa", 0.05)),
-            "vacancy_rate_pct": float(body.get("vacancy_rate_pct", 5)),
-            "property_growth_rate_pa": float(body.get("property_growth_rate_pa", 0.04)),
-            "inflation_rate": float(body.get("inflation_rate", 0.05)),
+            "rental_growth_rate_pa": float(body.get("rental_growth_rate_pa", DEFAULT_RENTAL_GROWTH_RATE)),
+            "vacancy_rate_pct": float(body.get("vacancy_rate_pct", DEFAULT_VACANCY_RATE)),
+            "property_growth_rate_pa": float(body.get("property_growth_rate_pa", DEFAULT_PROPERTY_GROWTH_RATE)),
+            "inflation_rate": float(body.get("inflation_rate", DEFAULT_INFLATION_RATE)),
             "projection_years": int(body.get("projection_years", 20)),
             "cgt_inclusion_rate": float(body.get("cgt_inclusion_rate", 0.40)),
-            "cgt_marginal_tax_rate": float(body.get("cgt_marginal_tax_rate", 0.45))
+            "cgt_marginal_tax_rate": float(body.get("cgt_marginal_tax_rate", 0.45)),
+            "is_primary_residence": bool(body.get("is_primary_residence", False))
         }
         result = run_property_monte_carlo(
             base_inputs=base_inputs,
@@ -1362,7 +1367,7 @@ async def property_sensitivity(request: Request, database_name: str = "Investmen
             "bond_registration_costs": float(body.get("bond_registration_costs", 0)),
             "other_acquisition_costs": float(body.get("other_acquisition_costs", 0)),
             "deposit_amount": float(body.get("deposit_amount", 150000)),
-            "bond_interest_rate": float(body.get("bond_interest_rate", 11.75)),
+            "bond_interest_rate": float(body.get("bond_interest_rate", DEFAULT_BOND_INTEREST_RATE)),
             "bond_term_years": int(body.get("bond_term_years", 20)),
             "monthly_levy": float(body.get("monthly_levy", 1500)),
             "monthly_rates": float(body.get("monthly_rates", 800)),
@@ -1371,13 +1376,14 @@ async def property_sensitivity(request: Request, database_name: str = "Investmen
             "monthly_management_fee_pct": float(body.get("monthly_management_fee_pct", 8)),
             "monthly_other_costs": float(body.get("monthly_other_costs", 0)),
             "monthly_rental_income": float(body.get("monthly_rental_income", 12000)),
-            "rental_growth_rate_pa": float(body.get("rental_growth_rate_pa", 0.05)),
-            "vacancy_rate_pct": float(body.get("vacancy_rate_pct", 5)),
-            "property_growth_rate_pa": float(body.get("property_growth_rate_pa", 0.04)),
-            "inflation_rate": float(body.get("inflation_rate", 0.05)),
+            "rental_growth_rate_pa": float(body.get("rental_growth_rate_pa", DEFAULT_RENTAL_GROWTH_RATE)),
+            "vacancy_rate_pct": float(body.get("vacancy_rate_pct", DEFAULT_VACANCY_RATE)),
+            "property_growth_rate_pa": float(body.get("property_growth_rate_pa", DEFAULT_PROPERTY_GROWTH_RATE)),
+            "inflation_rate": float(body.get("inflation_rate", DEFAULT_INFLATION_RATE)),
             "projection_years": int(body.get("projection_years", 20)),
             "cgt_inclusion_rate": float(body.get("cgt_inclusion_rate", 0.40)),
-            "cgt_marginal_tax_rate": float(body.get("cgt_marginal_tax_rate", 0.45))
+            "cgt_marginal_tax_rate": float(body.get("cgt_marginal_tax_rate", 0.45)),
+            "is_primary_residence": bool(body.get("is_primary_residence", False))
         }
         result = run_sensitivity_analysis(base_inputs)
         return result
