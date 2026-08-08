@@ -236,8 +236,8 @@ def calculate_investment_metrics(
         "total fee ratio", "total tax ratio", "total cost ratio", "dividend yield",
         "fee ratio annualized", "tax ratio annualized", "cost ratio annualized",
         "dividend yield annualized", "total contributions", "total fees",
-        "total tax", "total dividends", "number of contrabutions",
-        "average contabutions", "investment period",
+        "total tax", "total dividends", "number of contributions",
+        "average contributions", "investment period",
     ]
 
     investment_metrics = pd.DataFrame(0.0, index=investment_metrics_rows, columns=investment_metrics_columns)
@@ -324,9 +324,9 @@ def calculate_investment_metrics(
 
             # Counts
             count = contrib_df["contributions"].count()
-            investment_metrics.loc[row_name, "number of contrabutions"] = count
+            investment_metrics.loc[row_name, "number of contributions"] = count
             if count > 0:
-                investment_metrics.loc[row_name, "average contabutions"] = total_contrib / count
+                investment_metrics.loc[row_name, "average contributions"] = total_contrib / count
 
     # Calculate for each scenario
     calculate_row_metrics("local", contributions_local_df, fees_local_df, tax_local_df, dividends_local_df, 
@@ -424,8 +424,8 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                 inflation_df['year'] = inflation_df['date'].dt.year
                 inflation_df['date'] = inflation_df['date'].dt.date
             
-            is_local = (currency == 'ZAR' or currency == 'R')
-            from .currency import convert_currency_amount
+            from .currency import convert_currency_amount, resolve_currency_code, BASE_CURRENCY_CODE
+            is_local = (resolve_currency_code(currency) == BASE_CURRENCY_CODE)
             
             # Convert current_date to datetime for adjust_for_inflation
             current_date_dt = pd.to_datetime(current_date)
@@ -451,7 +451,7 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                 args['current_value_foreign'] = current_value
                 args['foreign_inflation_df'] = inflation_df
                 
-                # Convert to local (ZAR) for portfolio-wide aggregation
+                # Convert to local (base) currency for portfolio-wide aggregation
                 rate_cache = {}
                 def convert_df(df, val_col):
                     if df is None or df.empty: return None
@@ -459,7 +459,7 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                     converted_vals = []
                     for _, row in df.iterrows():
                         d_str = row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])
-                        val = convert_currency_amount(row[val_col], currency, 'ZAR', d_str, database_name, cursor, rate_cache)
+                        val = convert_currency_amount(row[val_col], currency, BASE_CURRENCY_CODE, d_str, database_name, cursor, rate_cache)
                         converted_vals.append(val)
                     new_df[val_col] = converted_vals
                     return new_df
@@ -468,11 +468,12 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                 args['fees_local_df'] = convert_df(fees_df, 'fees')
                 args['tax_local_df'] = convert_df(tax_df, 'tax')
                 args['dividends_local_df'] = convert_df(dividends_df, 'dividends')
-                args['current_value_local'] = convert_currency_amount(current_value, currency, 'ZAR', current_date_str, database_name, cursor, rate_cache)
+                args['current_value_local'] = convert_currency_amount(current_value, currency, BASE_CURRENCY_CODE, current_date_str, database_name, cursor, rate_cache)
                 
                 # Also need local inflation for the local part
-                query_local_inf = "SELECT inflation_date as date, inflation_rate FROM inflation WHERE country = 'South Africa' ORDER BY date"
-                local_inflation_df = pd.read_sql(query_local_inf, conn)
+                local_country = CURRENCY_COUNTRY_MAP.get(BASE_CURRENCY_CODE, 'South Africa')
+                query_local_inf = "SELECT inflation_date as date, inflation_rate FROM inflation WHERE country = %s ORDER BY date"
+                local_inflation_df = pd.read_sql(query_local_inf, conn, params=(local_country,))
                 if not local_inflation_df.empty:
                     local_inflation_df['date'] = pd.to_datetime(local_inflation_df['date'])
                     local_inflation_df['year'] = local_inflation_df['date'].dt.year
@@ -614,25 +615,25 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                 get_m("local", "total fee ratio"), get_m("local", "total tax ratio"), get_m("local", "total cost ratio"), get_m("local", "dividend yield"),
                 get_m("local", "fee ratio annualized"), get_m("local", "tax ratio annualized"), get_m("local", "cost ratio annualized"), get_m("local", "dividend yield annualized"),
                 get_m("local", "total contributions"), get_m("local", "total fees"), get_m("local", "total tax"), get_m("local", "total dividends"),
-                get_m("local", "number of contrabutions"), get_m("local", "average contabutions"), get_m("local", "investment period"),
+                get_m("local", "number of contributions"), get_m("local", "average contributions"), get_m("local", "investment period"),
 
                 get_m("local_inflation_adjusted", "net growth"), get_m("local_inflation_adjusted", "total return"), get_m("local_inflation_adjusted", "return multiple"), get_m("local_inflation_adjusted", "cagr"), get_m("local_inflation_adjusted", "irr"),
                 get_m("local_inflation_adjusted", "total fee ratio"), get_m("local_inflation_adjusted", "total tax ratio"), get_m("local_inflation_adjusted", "total cost ratio"), get_m("local_inflation_adjusted", "dividend yield"),
                 get_m("local_inflation_adjusted", "fee ratio annualized"), get_m("local_inflation_adjusted", "tax ratio annualized"), get_m("local_inflation_adjusted", "cost ratio annualized"), get_m("local_inflation_adjusted", "dividend yield annualized"),
                 get_m("local_inflation_adjusted", "total contributions"), get_m("local_inflation_adjusted", "total fees"), get_m("local_inflation_adjusted", "total tax"), get_m("local_inflation_adjusted", "total dividends"),
-                get_m("local_inflation_adjusted", "number of contrabutions"), get_m("local_inflation_adjusted", "average contabutions"), get_m("local_inflation_adjusted", "investment period"),
+                get_m("local_inflation_adjusted", "number of contributions"), get_m("local_inflation_adjusted", "average contributions"), get_m("local_inflation_adjusted", "investment period"),
 
                 get_m("foreign", "net growth"), get_m("foreign", "total return"), get_m("foreign", "return multiple"), get_m("foreign", "cagr"), get_m("foreign", "irr"),
                 get_m("foreign", "total fee ratio"), get_m("foreign", "total tax ratio"), get_m("foreign", "total cost ratio"), get_m("foreign", "dividend yield"),
                 get_m("foreign", "fee ratio annualized"), get_m("foreign", "tax ratio annualized"), get_m("foreign", "cost ratio annualized"), get_m("foreign", "dividend yield annualized"),
                 get_m("foreign", "total contributions"), get_m("foreign", "total fees"), get_m("foreign", "total tax"), get_m("foreign", "total dividends"),
-                get_m("foreign", "number of contrabutions"), get_m("foreign", "average contabutions"), get_m("foreign", "investment period"),
+                get_m("foreign", "number of contributions"), get_m("foreign", "average contributions"), get_m("foreign", "investment period"),
 
                 get_m("foreign_inflation_adjusted", "net growth"), get_m("foreign_inflation_adjusted", "total return"), get_m("foreign_inflation_adjusted", "return multiple"), get_m("foreign_inflation_adjusted", "cagr"), get_m("foreign_inflation_adjusted", "irr"),
                 get_m("foreign_inflation_adjusted", "total fee ratio"), get_m("foreign_inflation_adjusted", "total tax ratio"), get_m("foreign_inflation_adjusted", "total cost ratio"), get_m("foreign_inflation_adjusted", "dividend yield"),
                 get_m("foreign_inflation_adjusted", "fee ratio annualized"), get_m("foreign_inflation_adjusted", "tax ratio annualized"), get_m("foreign_inflation_adjusted", "cost ratio annualized"), get_m("foreign_inflation_adjusted", "dividend yield annualized"),
                 get_m("foreign_inflation_adjusted", "total contributions"), get_m("foreign_inflation_adjusted", "total fees"), get_m("foreign_inflation_adjusted", "total tax"), get_m("foreign_inflation_adjusted", "total dividends"),
-                get_m("foreign_inflation_adjusted", "number of contrabutions"), get_m("foreign_inflation_adjusted", "average contabutions"), get_m("foreign_inflation_adjusted", "investment period")
+                get_m("foreign_inflation_adjusted", "number of contributions"), get_m("foreign_inflation_adjusted", "average contributions"), get_m("foreign_inflation_adjusted", "investment period")
             )
             
             cursor.execute(insert_query, params)
@@ -651,6 +652,7 @@ def get_investment_metrics_by_name_data(database_name: str, investment_name: str
     Returns the same rich time-series structure as get_investment_metrics_data
     so the frontend can render charts for an individual investment.
     """
+    from .currency import BASE_CURRENCY_CODE  # noqa: F401 — used in return payloads
     with get_db_connection(database_name) as (conn, cursor):
         cursor.execute("SELECT id FROM investments WHERE investment_name = %s", (investment_name,))
         res = cursor.fetchone()
@@ -781,7 +783,7 @@ def get_investment_metrics_by_name_data(database_name: str, investment_name: str
         "data_source": "database",
         "data_points": len(rows),
         "generated_at": datetime.now().isoformat(),
-        "base_currency": "ZAR",
+        "base_currency": BASE_CURRENCY_CODE,
     }
 
 def recalculate_investment_metrics_history(database_name: str = DEFAULT_DB) -> None:
@@ -811,7 +813,7 @@ def recalculate_investment_metrics_history(database_name: str = DEFAULT_DB) -> N
 
     print("Completed recalculating investment metrics history")
 
-def calculate_portfolio_irr(database_name: str, base_currency: str = "ZAR") -> dict:
+def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> dict:
     """
     Calculate Internal Rate of Return (IRR) across multiple dimensions:
       - per_asset:        IRR for each individual investment
@@ -834,7 +836,10 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = "ZAR") -> d
     }
     """
     import re
-    from .currency import get_exchange_rate
+    from .currency import get_exchange_rate, BASE_CURRENCY_CODE
+
+    if base_currency is None:
+        base_currency = BASE_CURRENCY_CODE
 
     # Helper: detect if an investment_type is a retirement annuity
     RA_PATTERN = re.compile(r'(retirement|annuity|\bRA\b)', re.IGNORECASE)
@@ -1092,12 +1097,15 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = "ZAR") -> d
         return {"error": str(e), "generated_at": datetime.now().isoformat()}
 
 
-def get_investment_metrics_data(database_name: str, base_currency: str = "ZAR", filter_type: str = "portfolio") -> dict:
+def get_investment_metrics_data(database_name: str, base_currency: str = None, filter_type: str = "portfolio") -> dict:
     """
     Return real investment metrics from the database.
     
     Supports filters: portfolio, individual, by_currency, by_type, by_institution
     """
+    from .currency import BASE_CURRENCY_CODE
+    if base_currency is None:
+        base_currency = BASE_CURRENCY_CODE
     try:
         # Metric type prefix (can be parameterized later)
         prefix = "local_"  # local_ for ZAR nominal, local_real_ for inflation-adjusted

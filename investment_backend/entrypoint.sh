@@ -1,36 +1,46 @@
 #!/bin/bash
 set -e
 
-# Use PGPASSWORD for automatic authentication
-export PGPASSWORD="$POSTGRES_PASSWORD"
-
 echo "Waiting for PostgreSQL..."
-until pg_isready -h "$POSTGRES_HOST" -p 5432 -U "$POSTGRES_USER"; do
-  sleep 2
-done
-echo "PostgreSQL is ready"
+python3 -c "
+import psycopg2, time, os
+host = os.environ.get('POSTGRES_HOST', 'localhost')
+port = int(os.environ.get('POSTGRES_PORT', '5432'))
+user = os.environ.get('POSTGRES_USER', 'postgres')
+pwd = os.environ.get('POSTGRES_PASSWORD', 'changeme')
+db = os.environ.get('INVESTMENTS_DB', 'Investments')
 
-# Only create tables if the investments table does not exist
-TABLE_EXISTS=$(psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$INVESTMENTS_DB" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='investments'")
-if [ "$TABLE_EXISTS" != "1" ]; then
-    echo "Creating tables..."
-    python3 create_tables.py
-else
-    echo "Tables already exist, skipping creation"
-fi
+for _ in range(30):
+    try:
+        conn = psycopg2.connect(host=host, port=port, user=user, password=pwd, dbname=db)
+        conn.close()
+        print('PostgreSQL is ready')
+        break
+    except Exception as e:
+        print('Waiting for DB connection...', str(e))
+        time.sleep(2)
+"
 
-# Start FastAPI backend in the background
+# Start FastAPI backend in the background, restarting if it crashes so the
+# container stays functional (the frontend runs in the foreground below).
 echo "Starting FastAPI backend..."
-# Ensure backend modules are findable
 export PYTHONPATH=$PYTHONPATH:$(pwd)
-uvicorn investment_backend_fastapi:investment_api --host 0.0.0.0 --port 3337 &
+(
+    while true; do
+        if uvicorn investment_backend_fastapi:investment_api --host 0.0.0.0 --port 3337; then
+            echo "[entrypoint] Backend stopped cleanly, restarting in 5 seconds..."
+        else
+            code=$?
+            echo "[entrypoint] Backend crashed (exit code $code), restarting in 5 seconds..."
+        fi
+        sleep 5
+    done
+) &
 
 # Start Next.js frontend in the foreground
 echo "Starting Next.js frontend..."
 if [ -f "frontend/server.js" ]; then
-    # Standalone mode
     cd frontend && node server.js
 else
-    # Development/Standard mode
     npm --prefix frontend run start
 fi

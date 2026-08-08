@@ -1,4 +1,6 @@
+# NOTE: The app uses `network_mode: host` (see docker-compose.yml), so it binds
+# directly to host ports 3337 (FastAPI) and 3037 (Next.js). The `ports:` mapping
+# below is therefore a no-op under host networking and is intentionally omitted.
 services:
   app:
-    ports:
-      - "3337:3337"  # FastAPI only
+    restart: unless-stopped

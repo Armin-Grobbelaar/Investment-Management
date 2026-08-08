@@ -1,6 +1,6 @@
 import pandas as pd
 from .database import get_db_connection, DEFAULT_DB, create_connection
-from .currency import CURRENCY_SYMBOLS, convert_investment_data_for_display, SUPPORTED_BASE_CURRENCIES
+from .currency import CURRENCY_SYMBOLS, convert_investment_data_for_display, SUPPORTED_BASE_CURRENCIES, DEFAULT_BASE_CURRENCY
 from .utils import _fetch_and_store_historical_data, _handle_forex_investment
 from .metrics import update_investment_metrics
 
@@ -63,6 +63,14 @@ def add_investment(
 
             print(f"Added investment '{investment_name}' with ID {investment_id}.")
 
+            # If the same asset is already held in another account, share its
+            # price history instead of storing a second copy.
+            linked = _link_new_investment_to_price_master(
+                database_name, investment_id, investment_name, unit_currency, investment_type
+            )
+            if linked:
+                print(f"Linked '{investment_name}' to shared price master (investment {linked}).")
+
             # Fetch and store historical data is now handled asynchronously by fetch_prices_now
             # via BackgroundTasks in the FastAPI endpoint
 
@@ -84,6 +92,49 @@ def add_investment(
             print(f"Error adding investment: {e}")
             import traceback
             traceback.print_exc()
+
+def _link_new_investment_to_price_master(database_name: str, investment_id, investment_name: str, unit_currency: str, investment_type: str = ""):
+    """
+    If the same asset (same name + currency, ignoring account markers) is
+    already held by another investment, point the new investment at that
+    investment as its price master so its history is only stored once.
+    Returns the master investment id, or None if nothing matched.
+    """
+    if investment_type and investment_type.lower() == 'forex':
+        return None
+    from .price_scraper import _asset_group_key
+    key = _asset_group_key(investment_name)
+    if not key:
+        return None
+
+    with get_db_connection(database_name) as (conn, cursor):
+        cursor.execute("""
+            SELECT i.id, i.investment_name
+            FROM investments i
+            WHERE i.id <> %s
+              AND i.investment_type <> 'Forex'
+              AND i.investment_ticker <> 'PORTFOLIO'
+              AND i.price_source_investment_id IS NULL
+              AND i.unit_currency = %s
+            ORDER BY (SELECT COUNT(*) FROM unit_prices up WHERE up.investment_id = i.id) DESC, i.id ASC
+        """, (investment_id, unit_currency))
+        for master_id, master_name in cursor.fetchall():
+            if _asset_group_key(master_name) != key:
+                continue
+            cursor.execute(
+                "UPDATE investments SET price_source_investment_id = %s WHERE id = %s",
+                (master_id, investment_id)
+            )
+            cursor.execute(
+                "UPDATE investments SET unit_price = "
+                "(SELECT unit_price FROM investments WHERE id = %s) WHERE id = %s",
+                (master_id, investment_id)
+            )
+            cursor.execute("DELETE FROM unit_prices WHERE investment_id = %s", (investment_id,))
+            conn.commit()
+            return master_id
+    return None
+
 
 def get_investment_summary(database_name: str = DEFAULT_DB):
     """
@@ -180,13 +231,13 @@ def get_all_investment_values(database_name):
         unit_price_query = """
             WITH cte AS (
             SELECT
-                unit_prices.investment_id AS id,
-                unit_prices.unit_price_date,
-                unit_prices.unit_price,
+                v_investment_prices.investment_id AS id,
+                v_investment_prices.unit_price_date,
+                v_investment_prices.unit_price,
                 COALESCE(total_units_held, 0) AS total_units_held,
-                MAX(CASE WHEN total_units_held > 0 THEN unit_prices.unit_price_date END)
-                    OVER (PARTITION BY unit_prices.investment_id ORDER BY unit_prices.unit_price_date) AS last_non_zero_date
-            FROM unit_prices
+                MAX(CASE WHEN total_units_held > 0 THEN v_investment_prices.unit_price_date END)
+                    OVER (PARTITION BY v_investment_prices.investment_id ORDER BY v_investment_prices.unit_price_date) AS last_non_zero_date
+            FROM v_investment_prices
             LEFT JOIN (
                 SELECT
                     investment_id,
@@ -194,8 +245,8 @@ def get_all_investment_values(database_name):
                     SUM(number_of_units) AS total_units_held
                 FROM transactions
                 GROUP BY investment_id, transaction_date
-            ) AS transaction_totals ON unit_prices.investment_id = transaction_totals.investment_id
-                                    AND unit_prices.unit_price_date = transaction_totals.transaction_date
+            ) AS transaction_totals ON v_investment_prices.investment_id = transaction_totals.investment_id
+                                    AND v_investment_prices.unit_price_date = transaction_totals.transaction_date
         )
         SELECT
             id,
@@ -248,13 +299,16 @@ def get_all_investment_values(database_name):
     finally:
         conn.close()
 
-def get_investment_data(base_currency: str = "ZAR",
+def get_investment_data(base_currency: str = None,
                        filter_currency: str = None,
                        filter_investment_type: str = None,
                        database_name: str = DEFAULT_DB) -> pd.DataFrame:
     """
     Get investment data with optional currency conversion and filtering for frontend display.
     """
+    if base_currency is None:
+        base_currency = DEFAULT_BASE_CURRENCY
+
     if base_currency not in SUPPORTED_BASE_CURRENCIES:
         raise ValueError(f"Base currency '{base_currency}' not supported. Available: {SUPPORTED_BASE_CURRENCIES}")
 
@@ -335,7 +389,7 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
             SELECT i.id, i.unit_currency, i.number_of_units_held,
                    up.unit_price_date, up.unit_price
             FROM investments i
-            JOIN unit_prices up ON up.investment_id = i.id
+            JOIN v_investment_prices up ON up.investment_id = i.id
             WHERE i.number_of_units_held > 0 AND i.investment_type <> 'Forex'
               AND up.unit_price > 0
             ORDER BY up.unit_price_date
@@ -352,7 +406,7 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
         cursor.execute("""
             SELECT i.id, i.investment_ticker, up.unit_price_date, up.unit_price
             FROM investments i
-            JOIN unit_prices up ON up.investment_id = i.id
+            JOIN v_investment_prices up ON up.investment_id = i.id
             WHERE i.investment_type = 'Forex'
             ORDER BY up.unit_price_date
         """)

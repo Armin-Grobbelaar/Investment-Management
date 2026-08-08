@@ -1,0 +1,8 @@
+tensorflow-cpu>=2.16.0
+keras>=3.0.0
+numpy
+scikit-learn
+scipy
+fastapi
+uvicorn[standard]
+pydantic

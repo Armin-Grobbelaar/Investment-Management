@@ -10,7 +10,7 @@ import psycopg2
 from .database import get_db_connection, DEFAULT_DB
 
 
-def import_unit_prices_csv(file_name, investment_name, currency="USD"):
+def import_unit_prices_csv(file_name, investment_name):
     """
     Import unit prices from CSV file for a specific investment.
 

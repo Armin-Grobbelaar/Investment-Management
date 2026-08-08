@@ -316,8 +316,9 @@ def import_unit_prices_api(file_content, investment_name):
         with open(file_name, "wb") as temp_file:
             temp_file.write(file_content)
 
-        # Call the existing function
-        import_unit_prices_csv(file_name, investment_name, "USD")
+        # Call the existing function (currency is stored on the investment
+        # record itself, so no currency argument is needed)
+        import_unit_prices_csv(file_name, investment_name)
 
         return {"message": "Unit prices imported successfully", "investment_name": investment_name}
     except Exception as e:
@@ -343,8 +344,9 @@ def import_investment_data_api(data_type: str, file_content, investment_name: st
             message = import_mixed_csv_data(temp_file_name, investment_name)
 
         elif data_type == 'unit_prices':
-            # Use existing unit prices function
-            import_unit_prices_csv(temp_file_name, investment_name, "USD")
+            # Use existing unit prices function (currency is stored on the
+            # investment record itself, so no currency argument is needed)
+            import_unit_prices_csv(temp_file_name, investment_name)
             message = f"Unit prices imported successfully for {investment_name}"
 
         elif data_type == 'transactions':
@@ -836,7 +838,7 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
                     "institution_name": row["institution_name"],
                     "investment_name": row["investment_name"],
                     "investment_type": row["investment_type"],
-                    "unit_currency": base_currency,
+                    "unit_currency": row.get("unit_currency", base_currency),
                     "investment_value_in_native_currency": round(row.get("investment_value", 0), 2),
                     "unit_price_in_native_currency": round(row.get("unit_price", 0), 2),
                     "total_units_held": float(row.get("total_units_held", row.get("number_of_units_held", 0))),
@@ -849,24 +851,27 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
                 raise e
 
         # Key metrics for dashboard tiles
+        # Actual IRR from the portfolio metric data is calculated in the metrics
+        # module; this legacy endpoint is superseded by /dashboard_charts in
+        # investment_backend_fastapi.py. IRR/contributions fall back to 0 here.
         key_metrics = [
             {
                 "metric": "IRR",
-                "value": round(0.095, 2),
+                "value": round(0.0, 2),
                 "unit": "%",
-                "formatted_value": "9.5%"
+                "formatted_value": "0.0%"
             },
             {
                 "metric": "Total Net Worth",
                 "value": round(total_individual, 2),
-                "unit": "ZAR",
-                "formatted_value": f"R{round(total_individual, 2):,.2f}"
+                "unit": base_currency,
+                "formatted_value": f"{base_currency} {round(total_individual, 2):,.2f}"
             },
             {
                 "metric": "Total Contributions",
                 "value": round(0.0, 2),
-                "unit": "ZAR",
-                "formatted_value": f"R{0.0:,.2f}"
+                "unit": base_currency,
+                "formatted_value": f"{base_currency} {round(0.0, 2):,.2f}"
             },
             {
                 "metric": "Total Investment Time",

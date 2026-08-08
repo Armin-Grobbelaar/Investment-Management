@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import json
 
 from investment_database_functions import get_investment_data, DEFAULT_DB
-from modules.predictions import StockPredictor, store_prediction_data
+from modules.predictions import StockPredictor, store_prediction_data, get_available_models_info
 
 def get_investment_predictions(database_name, scope="portfolio", models_to_run=None):
     """
@@ -91,7 +91,8 @@ def get_investment_predictions(database_name, scope="portfolio", models_to_run=N
         'timestamp': datetime.now().isoformat(),
         'models_available': len(predictions),
         'models_requested': len(models_to_run),
-        'data_quality_score': 0.95 # Placeholder
+        'data_quality_score': 0.95,
+        'system_info': get_available_models_info()
     }
     
     # 6. Store in Database

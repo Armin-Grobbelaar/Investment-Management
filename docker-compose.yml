@@ -6,8 +6,11 @@ services:
     image: armingrobbelaar/investment_app:latest
     container_name: investment_app
     restart: unless-stopped
-    # Use host networking to easily access existing DBs on 5432/5433
+    # Use host networking to easily access existing DBs on 5432/5433 and the
+    # TensorFlow prediction API published on host port 8869.
     network_mode: host
+    depends_on:
+      - tensorflow-api
     environment:
       # Point to your existing databases on the host
       POSTGRES_HOST: localhost
@@ -16,9 +19,28 @@ services:
       POSTGRES_PASSWORD: changeme
       INVESTMENTS_DB: Investments
       USERS_DB: Users
+      # TensorFlow prediction API (dedicated container, see tensorflow-api
+      # below). Used by the LSTM and hybrid ARIMA-LSTM prediction models.
+      TENSORFLOW_API_URL: http://localhost:8869
+      # Legacy remote TF server URL — kept for compatibility (health check only).
+      TENSORFLOW_SERVER_URL: http://localhost:8868
       # Frontend environment
       NODE_ENV: production
-      PORT: 3000
+      PORT: 3037
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  tensorflow-api:
+    build:
+      context: ./tensorflow_service
+    image: armingrobbelaar/investment_tensorflow_api:latest
+    container_name: tensorflow_api
+    restart: unless-stopped
+    ports:
+      - "8869:8000"
     logging:
       driver: "json-file"
       options:

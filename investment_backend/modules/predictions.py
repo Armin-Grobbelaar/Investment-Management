@@ -1,4 +1,6 @@
 import json
+import os
+import requests
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -20,7 +22,38 @@ _LIBRARIES_STATUS = {
     'scipy': False
 }
 
-# Attempt imports and track availability
+# URL of the dedicated TensorFlow prediction API container (see the
+# tensorflow-api service in docker-compose.yml). Falls back to the legacy
+# TENSORFLOW_SERVER_URL. LSTM/hybrid models run on this remote service.
+TENSORFLOW_API_URL = (
+    os.environ.get("TENSORFLOW_API_URL")
+    or os.environ.get("TENSORFLOW_SERVER_URL")
+    or ""
+).rstrip("/")
+
+# True when the remote TensorFlow prediction API is reachable.
+_REMOTE_TF_AVAILABLE = False
+
+
+def _refresh_tf_api_status():
+    """Health-check the remote TensorFlow prediction API and update status."""
+    global _REMOTE_TF_AVAILABLE
+    if not TENSORFLOW_API_URL:
+        _LIBRARIES_STATUS['tensorflow'] = False
+        _REMOTE_TF_AVAILABLE = False
+        return
+    try:
+        resp = requests.get(f"{TENSORFLOW_API_URL}/health", timeout=5)
+        if resp.status_code == 200:
+            _LIBRARIES_STATUS['tensorflow'] = True
+            _REMOTE_TF_AVAILABLE = True
+        else:
+            _LIBRARIES_STATUS['tensorflow'] = False
+            _REMOTE_TF_AVAILABLE = False
+    except Exception:
+        _LIBRARIES_STATUS['tensorflow'] = False
+        _REMOTE_TF_AVAILABLE = False
+
 
 # Attempt imports and track availability
 try:
@@ -35,24 +68,16 @@ try:
 except ImportError:
     pass
 
-try:
-    # Deep Learning imports
-    import tensorflow as tf
-    # TF 2.16+ ships Keras 3 as a standalone package; support both APIs.
-    try:
-        from tensorflow.keras.models import Sequential, Model
-        from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, Concatenate
-        from tensorflow.keras.optimizers import Adam
-    except (ImportError, AttributeError):
-        # Keras 3 standalone (pip install keras)
-        from keras.models import Sequential, Model
-        from keras.layers import LSTM, Dense, Dropout, Input, Concatenate
-        from keras.optimizers import Adam
-    from sklearn.preprocessing import MinMaxScaler
-    _LIBRARIES_STATUS['tensorflow'] = True
-    _LIBRARIES_STATUS['sklearn'] = True
-except ImportError:
-    pass
+# TensorFlow is provided by the remote prediction API service.
+if TENSORFLOW_API_URL:
+    _refresh_tf_api_status()
+    if _LIBRARIES_STATUS['tensorflow']:
+        print(f"Connected to TensorFlow prediction API at {TENSORFLOW_API_URL}")
+    else:
+        print(f"TensorFlow prediction API not reachable at {TENSORFLOW_API_URL} — LSTM models disabled")
+else:
+    print("No TensorFlow prediction API URL configured — LSTM models disabled")
+
 
 try:
     # Machine Learning imports
@@ -657,85 +682,45 @@ class StockPredictor:
             return None
 
     def predict_lstm(self, historical_data, steps=30):
-        if not _LIBRARIES_STATUS['tensorflow'] or not _LIBRARIES_STATUS['sklearn']:
-            print("LSTM model skipped - required libraries not available")
+        """LSTM forecast via the remote TensorFlow prediction API."""
+        if not TENSORFLOW_API_URL:
+            print("LSTM model skipped - TensorFlow prediction API URL not configured")
             return None
 
         try:
-            data = historical_data['close'].values.reshape(-1, 1)
-            scaler = MinMaxScaler(feature_range=(0, 1))
-            scaled_data = scaler.fit_transform(data)
-
-            def create_sequences(data, seq_length=60):
-                sequences = []
-                targets = []
-                for i in range(len(data) - seq_length):
-                    sequences.append(data[i:i+seq_length])
-                    targets.append(data[i+seq_length])
-                return np.array(sequences), np.array(targets)
-
-            seq_length = min(60, len(scaled_data) // 2)
-            if seq_length < 10:
-                print("LSTM model skipped - insufficient data for sequences")
+            if historical_data is None or historical_data.empty:
+                print("LSTM model skipped - no historical data")
                 return None
 
-            X, y = create_sequences(scaled_data, seq_length)
-            model = Sequential([
-                LSTM(50, return_sequences=True, input_shape=(seq_length, 1)),
-                Dropout(0.2),
-                LSTM(50, return_sequences=False),
-                Dropout(0.2),
-                Dense(25),
-                Dense(1)
-            ])
-            model.compile(optimizer='adam', loss='mean_squared_error')
-            
-            train_size = int(len(X) * 0.8)
-            X_train, X_test = X[:train_size], X[train_size:]
-            y_train, y_test = y[:train_size], y[train_size:]
-            
-            model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
-
-            predictions = []
-            current_sequence = scaled_data[-seq_length:].reshape(1, seq_length, 1)
-
-            for _ in range(steps):
-                pred = model.predict(current_sequence, verbose=0)[0][0]
-                predictions.append(pred)
-                current_sequence = np.roll(current_sequence, -1, axis=1)
-                current_sequence[0, -1] = pred
-
-            predictions_scaled = np.array(predictions).reshape(-1, 1)
-            predictions_original = scaler.inverse_transform(predictions_scaled).flatten()
-
-            prediction_std = np.std(predictions_original) * self.adjustments['volatility_multiplier'] * 0.5
-            z_score = stats.norm.ppf((1 + CONFIDENCE_LEVEL) / 2)
-
-            last_date = historical_data['date'].iloc[-1]
-            forecast_dates = [last_date + timedelta(days=i+1) for i in range(steps)]
-
-            # model.evaluate returns MSE loss; convert to a 0–1 score
-            if len(X_test) > 0:
-                try:
-                    eval_result = model.evaluate(X_test, y_test, verbose=0)
-                    loss = float(eval_result) if not hasattr(eval_result, '__len__') else float(eval_result[0])
-                    lstm_accuracy = float(max(0.3, min(0.95, 1.0 / (1.0 + loss))))
-                except Exception:
-                    lstm_accuracy = 0.75
-            else:
-                lstm_accuracy = 0.75
-
-            return {
-                'dates': [d.strftime('%Y-%m-%d') for d in forecast_dates],
-                'predictions': [float(v) for v in predictions_original.tolist()],
-                'upper_bound': [float(v) for v in (predictions_original + z_score * prediction_std).tolist()],
-                'lower_bound': [float(v) for v in (predictions_original - z_score * prediction_std).tolist()],
-                'model_name': 'LSTM Neural Network',
-                'accuracy_score': lstm_accuracy,
-                'risk_level': float(self.adjustments['volatility_multiplier'])
+            # Send the raw price series to the TensorFlow prediction service.
+            payload = {
+                'data': [
+                    {'date': str(row['date'])[:10], 'price': float(row['close'])}
+                    for _, row in historical_data.iterrows()
+                ],
+                'steps': steps,
+                'confidence_level': CONFIDENCE_LEVEL,
+                'volatility_multiplier': self.adjustments['volatility_multiplier']
             }
+
+            resp = requests.post(
+                f"{TENSORFLOW_API_URL}/predict/lstm",
+                json=payload,
+                timeout=600  # Remote model training can take a while
+            )
+            if resp.status_code != 200:
+                print(f"LSTM prediction failed (remote): HTTP {resp.status_code}: {resp.text[:300]}")
+                _LIBRARIES_STATUS['tensorflow'] = False
+                return None
+
+            result = resp.json()
+            _LIBRARIES_STATUS['tensorflow'] = True
+            _REMOTE_TF_AVAILABLE = True
+            result.setdefault('model_name', 'LSTM Neural Network')
+            return result
         except Exception as e:
-            print(f"LSTM prediction failed: {e}")
+            print(f"LSTM prediction failed (remote): {e}")
+            _LIBRARIES_STATUS['tensorflow'] = False
             return None
 
     def predict_xgboost(self, historical_data, steps=30):
@@ -1022,7 +1007,7 @@ def get_historical_data_from_db(database_name, scope="portfolio", days=365, inve
                 # Fetch unit price history for specific investment
                 query = """
                     SELECT up.unit_price_date, up.unit_price as close, i.unit_currency
-                    FROM unit_prices up
+                    FROM v_investment_prices up
                     JOIN investments i ON up.investment_id = i.id
                     WHERE up.unit_price_date >= %s AND i.investment_name = %s
                     ORDER BY up.unit_price_date ASC
@@ -1040,7 +1025,7 @@ def get_historical_data_from_db(database_name, scope="portfolio", days=365, inve
                 # Fetch ALL historical unit prices and units held to aggregate accurately
                 query = """
                     SELECT up.unit_price_date, up.unit_price, i.number_of_units_held, i.unit_currency
-                    FROM unit_prices up
+                    FROM v_investment_prices up
                     JOIN investments i ON up.investment_id = i.id
                     WHERE up.unit_price_date >= %s
                     ORDER BY up.unit_price_date ASC
@@ -1159,6 +1144,7 @@ def get_investment_predictions(database_name, scope="portfolio", model_filter=No
         library_status = {
             'available_models': available_models,
             'library_status': _LIBRARIES_STATUS.copy(),
+            'remote_tensorflow': _REMOTE_TF_AVAILABLE,
             'models_requested': requested_models,
             'models_delivered': list(predictions.keys())
         }
@@ -1188,6 +1174,7 @@ def get_investment_predictions(database_name, scope="portfolio", model_filter=No
             'timestamp': datetime.now().isoformat(),
             'system_info': {
                 'library_status': _LIBRARIES_STATUS.copy(),
+                'remote_tensorflow': _REMOTE_TF_AVAILABLE,
                 'error': str(e)
             }
         }
@@ -1200,6 +1187,7 @@ def get_available_models_info():
     return {
         'available_models': available_models,
         'library_status': _LIBRARIES_STATUS.copy(),
+        'remote_tensorflow': _REMOTE_TF_AVAILABLE,
         'total_libraries_available': sum(_LIBRARIES_STATUS.values()),
         'models_count': len(available_models)
     }

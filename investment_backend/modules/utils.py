@@ -44,11 +44,13 @@ def _fetch_and_store_historical_data(cursor, investment_ticker: str, investment_
         ).fillna(0)
         
         investment_unit_prices["investment_id"] = investment_id
-        
-        # Adjust for ZAc currency
-        if ticker.info.get("currency") == "ZAc":
-            investment_unit_prices["unit_price"] /= 100
-            
+
+        # NOTE: yfinance JSE (.JO) Close prices are already in Rands, even
+        # though ticker.info["currency"] may report "ZAc" (a known yfinance
+        # metadata quirk for JSE stocks). Do NOT divide by 100 here — that
+        # would corrupt Rands-denominated prices into cents and mix scales
+        # with manually-entered prices (which are in Rands).
+
         # Insert historical data
         engine_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{database_name}"
         engine = create_engine(engine_url)

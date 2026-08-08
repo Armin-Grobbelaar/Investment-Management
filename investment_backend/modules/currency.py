@@ -1,12 +1,39 @@
 import pandas as pd
-from .database import get_db_connection, DEFAULT_DB
+from .database import get_db_connection, DEFAULT_DB, get_config_value
 
 # Currency symbols mapping (for storage - original currencies)
 CURRENCY_SYMBOLS = {"R": "ZAR", "€": "EUR", "£": "GBP", "$": "USD"}
-NATIVE_CURRENCY = "R"
 
-# Supported base currencies for display conversion (frontend selectable)
+# Native currency symbol, sourced from the configuration table so it can be
+# changed at runtime (e.g. from "R" for South Africa to "$" for a US user)
+# without touching code.
+NATIVE_CURRENCY = get_config_value("native_currency", "R") or "R"
+
+# Supported base currencies for display conversion (frontend selectable).
+# Sourced from the configuration table; the base_currency key defines which
+# one is the default display currency.
+DEFAULT_BASE_CURRENCY = get_config_value("base_currency", "ZAR") or "ZAR"
 SUPPORTED_BASE_CURRENCIES = ["ZAR", "USD", "EUR", "GBP"]
+
+
+def resolve_currency_code(value: str) -> str:
+    """Map a currency symbol or code to its ISO code (e.g. 'R' -> 'ZAR').
+
+    The configuration table stores the base currency as an ISO code ('ZAR'),
+    while individual investments may store a symbol ('R'). This helper makes
+    comparisons safe regardless of which form is used.
+    """
+    if not value:
+        return DEFAULT_BASE_CURRENCY
+    value = value.strip()
+    if value in CURRENCY_SYMBOLS:
+        return CURRENCY_SYMBOLS[value]
+    return value.upper()
+
+
+# ISO code for the configured base currency (used for "local" metrics and
+# for converting foreign investment cash flows into the reporting currency).
+BASE_CURRENCY_CODE = resolve_currency_code(DEFAULT_BASE_CURRENCY)
 
 def get_exchange_rate(from_currency: str, to_currency: str, date: str = None, database_name: str = DEFAULT_DB, cursor=None) -> float:
     """
@@ -50,7 +77,7 @@ def get_exchange_rate(from_currency: str, to_currency: str, date: str = None, da
         if forex_id:
             # Use inverse rate
             rate_query = """
-                SELECT unit_price FROM unit_prices
+                SELECT unit_price FROM v_investment_prices
                 WHERE investment_id = %s
             """
             if date:
@@ -63,7 +90,7 @@ def get_exchange_rate(from_currency: str, to_currency: str, date: str = None, da
             return 1.0  # No conversion available
 
     # Get direct rate
-    rate_query = "SELECT unit_price FROM unit_prices WHERE investment_id = %s"
+    rate_query = "SELECT unit_price FROM v_investment_prices WHERE investment_id = %s"
     if date:
         rate_query += " AND unit_price_date <= %s"
     rate_query += " ORDER BY unit_price_date DESC LIMIT 1"
@@ -98,7 +125,7 @@ def convert_currency_amount(amount: float, from_currency: str, to_currency: str,
             
     return amount * exchange_rate
 
-def convert_investment_data_for_display(df: pd.DataFrame, base_currency: str = "ZAR", database_name: str = DEFAULT_DB) -> pd.DataFrame:
+def convert_investment_data_for_display(df: pd.DataFrame, base_currency: str = None, database_name: str = DEFAULT_DB) -> pd.DataFrame:
     """
     Convert investment data monetary values to specified base currency for display.
     Optimized to use a single database connection and cache exchange rates.
@@ -111,6 +138,9 @@ def convert_investment_data_for_display(df: pd.DataFrame, base_currency: str = "
     Returns:
         DataFrame with converted monetary values
     """
+    if base_currency is None:
+        base_currency = DEFAULT_BASE_CURRENCY
+
     if df.empty or base_currency not in SUPPORTED_BASE_CURRENCIES:
         return df
 

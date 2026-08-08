@@ -5,6 +5,7 @@ import {
     Container, Paper, IconButton, Select, MenuItem, FormControl,
     InputLabel, Box, Typography, Chip, Card, CardContent,
     Tabs, Tab, CircularProgress, Divider, Alert, Tooltip as MuiTooltip,
+    Table, TableContainer, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import { brandingDarkTheme, brandingLightTheme } from '../Themes/muiTheme';
@@ -32,6 +33,8 @@ import axios from 'axios';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, ChartTooltip, Legend, Filler);
 
+const DB_NAME = process.env.NEXT_PUBLIC_DB_NAME || 'Investments';
+
 const CHART_COLORS: Record<string, string> = {
     blue: '#2196f3', green: '#4caf50', red: '#f44336', purple: '#9c27b0',
     orange: '#ff9800', teal: '#009688', pink: '#e91e63', indigo: '#3f51b5',
@@ -45,6 +48,75 @@ const METRIC_THEMES: Record<string, { bg: string; icon: React.ReactNode }> = {
     total_fees: { bg: 'linear-gradient(135deg, #c62828, #d32f2f)', icon: <MoneyOffIcon sx={{ fontSize: 40 }} /> },
 };
 
+const ComparisonView = ({ data, fmtCurrency, fmtPct }: { data: any; fmtCurrency: (v: number) => string; fmtPct: (v: number) => string }) => {
+    if (!data || !data.groups || data.groups.length === 0) {
+        return (
+            <Paper elevation={1} sx={{ p: 4, borderRadius: 3 }}>
+                <Typography variant="body1" color="text.secondary" align="center">
+                    No assets are held in more than one account yet. When you hold the same fund or
+                    ETF in multiple accounts, it appears here so you can compare its metrics.
+                </Typography>
+            </Paper>
+        );
+    }
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {data.groups.map((group: any, gi: number) => (
+                <Paper key={`${group.asset}-${gi}`} elevation={2} sx={{ borderRadius: 3, p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                        <Box>
+                            <Typography variant="h6" fontWeight="bold">{group.asset}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                                Same asset in {group.accounts.length} accounts · {group.source} · {group.currency}
+                            </Typography>
+                        </Box>
+                        <Chip label={`Combined value: ${fmtCurrency(group.total_value)}`} color="primary" variant="outlined" />
+                    </Box>
+                    <TableContainer>
+                        <Table size="small">
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Account / Institution</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Units</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Price</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Value</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Contributions</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Net Growth</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Total Return</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>IRR</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>CAGR</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Period</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Share</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {group.accounts.map((acc: any) => (
+                                    <TableRow key={acc.id} hover>
+                                        <TableCell>
+                                            <Typography variant="body2" fontWeight="medium">{acc.name}</Typography>
+                                            <Typography variant="caption" color="text.secondary">{acc.institution}</Typography>
+                                        </TableCell>
+                                        <TableCell align="right">{acc.units}</TableCell>
+                                        <TableCell align="right">{acc.current_price}</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmtCurrency(acc.current_value)}</TableCell>
+                                        <TableCell align="right">{fmtCurrency(acc.total_contributions)}</TableCell>
+                                        <TableCell align="right" sx={{ color: (acc.net_growth ?? 0) >= 0 ? 'success.main' : 'error.main' }}>{fmtCurrency(acc.net_growth)}</TableCell>
+                                        <TableCell align="right" sx={{ color: (acc.total_return_pct ?? 0) >= 0 ? 'success.main' : 'error.main' }}>{fmtPct(acc.total_return_pct)}</TableCell>
+                                        <TableCell align="right" sx={{ color: (acc.irr_pct ?? 0) >= 0 ? 'success.main' : 'error.main' }}>{fmtPct(acc.irr_pct)}</TableCell>
+                                        <TableCell align="right">{fmtPct(acc.cagr_pct)}</TableCell>
+                                        <TableCell align="right">{acc.period_years ?? 'N/A'} yrs</TableCell>
+                                        <TableCell align="right">{acc.share_pct}%</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </Paper>
+            ))}
+        </Box>
+    );
+};
+
 export default function EnhancedViewInvestmentMetrics() {
     const router = useRouter();
     const [darkMode, setDarkMode] = useState(true);
@@ -54,6 +126,7 @@ export default function EnhancedViewInvestmentMetrics() {
     const [dimensionType, setDimensionType] = useState<number>(0);
     const [dimensionValue, setDimensionValue] = useState<string>('All');
     const [metricsData, setMetricsData] = useState<any>(null);
+    const [comparisonData, setComparisonData] = useState<any>(null);
     const [chartTab, setChartTab] = useState<number>(0);
     const [menuItems] = useState<any[]>([
         { heading: "Tools & Analysis", items: ["Dashboard", "Factsheets", "Property Analysis", "Monte Carlo Simulations"], urls: ["/Investments", "/Factsheets", "/PropertyAnalysis", "/ViewInvestmentPredictions"] }
@@ -69,6 +142,7 @@ export default function EnhancedViewInvestmentMetrics() {
         { label: "By Account Type", id: "account_type", arrayName: "account_types" },
         { label: "By Currency", id: "currency", arrayName: "currencies" },
         { label: "Portfolio Total", id: "portfolio", arrayName: null },
+        { label: "Across Accounts", id: "comparison", arrayName: null },
     ];
 
     const CHART_GROUPS = [
@@ -98,13 +172,20 @@ export default function EnhancedViewInvestmentMetrics() {
             setError(null);
             try {
                 const currentDim = DIMENSIONS[dimensionType];
+                if (currentDim.id === 'comparison') {
+                    const response = await axios.get(`/api/investment_comparison/${DB_NAME}`);
+                    setComparisonData(response.data);
+                    setMetricsData(null);
+                    setLoading(false);
+                    return;
+                }
                 let filter = currentDim.id;
                 if (filter !== 'portfolio') {
                     filter = filter === 'investment' ? dimensionValue : `${filter}:${dimensionValue}`;
                 }
                 const url = currentDim.id === 'investment'
-                    ? `/api/investment_metrics_by_name/Investments/${encodeURIComponent(filter)}`
-                    : `/api/investment_metrics/Investments?filter=${encodeURIComponent(filter)}`;
+                    ? `/api/investment_metrics_by_name/${DB_NAME}/${encodeURIComponent(filter)}`
+                    : `/api/investment_metrics/${DB_NAME}?filter=${encodeURIComponent(filter)}`;
                 const response = await axios.get(url);
                 setMetricsData(response.data);
             } catch (err) {
@@ -140,11 +221,17 @@ export default function EnhancedViewInvestmentMetrics() {
         (async () => {
             try {
                 const currentDim = DIMENSIONS[dimensionType];
+                if (currentDim.id === 'comparison') {
+                    const response = await axios.get(`/api/investment_comparison/${DB_NAME}`);
+                    setComparisonData(response.data);
+                    setLoading(false);
+                    return;
+                }
                 let filter = currentDim.id;
                 if (filter !== 'portfolio') filter = filter === 'investment' ? dimensionValue : `${filter}:${dimensionValue}`;
                 const url = currentDim.id === 'investment'
-                    ? `/api/investment_metrics_by_name/Investments/${encodeURIComponent(filter)}`
-                    : `/api/investment_metrics/Investments?filter=${encodeURIComponent(filter)}`;
+                    ? `/api/investment_metrics_by_name/${DB_NAME}/${encodeURIComponent(filter)}`
+                    : `/api/investment_metrics/${DB_NAME}?filter=${encodeURIComponent(filter)}`;
                 const response = await axios.get(url);
                 setMetricsData(response.data);
             } catch (err) { console.error(err); }
@@ -160,7 +247,7 @@ export default function EnhancedViewInvestmentMetrics() {
     const fmtDecimal = (val: number) => val == null ? 'N/A' : Number(val).toFixed(4);
 
     const getLatest = (key: string, field = 'value', fb = 0) => metricsData?.[key]?.length ? (metricsData[key][metricsData[key].length - 1]?.[field] ?? fb) : fb;
-    const safeGet = (obj: any, path: string, fb = 0) => { let c = obj; for (const k of path.split('.')) { if (c == null) return fb; c = c[k]; } return c ?? fb; };
+    const safeGet = (obj: any, path: string, fb: any = 0) => { let c = obj; for (const k of path.split('.')) { if (c == null) return fb; c = c[k]; } return c ?? fb; };
     const hasData = (k: string) => metricsData?.[k]?.length > 0;
     const hasNested = (p: string, c: string) => metricsData?.[p]?.[c]?.length > 0;
 
@@ -270,6 +357,8 @@ export default function EnhancedViewInvestmentMetrics() {
                         <Box display="flex" justifyContent="center" alignItems="center" py={15} flexDirection="column" gap={2}>
                             <CircularProgress size={60} /><Typography variant="body1" color="text.secondary">Loading metrics...</Typography>
                         </Box>
+                    ) : currentDimension.id === 'comparison' ? (
+                        <ComparisonView data={comparisonData} fmtCurrency={fmtCurrency} fmtPct={fmtPct} />
                     ) : metricsData ? (
                         <>
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>

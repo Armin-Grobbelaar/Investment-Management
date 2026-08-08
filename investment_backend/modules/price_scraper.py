@@ -63,6 +63,7 @@ def _get_investments(database_name: str) -> list[dict]:
     with get_db_connection(database_name) as (conn, cursor):
         cursor.execute("""
             SELECT i.id, i.investment_name, i.investment_ticker, i.unit_currency, i.investment_type,
+                   i.price_source_investment_id,
                    m.source, m.source_ticker, m.backfill_complete
             FROM investments i
             LEFT JOIN investment_source_meta m ON m.investment_id = i.id
@@ -70,6 +71,90 @@ def _get_investments(database_name: str) -> list[dict]:
         """)
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
+# Account-type markers stripped when matching investments that hold the same
+# asset in different accounts (e.g. "Satrix Nasdaq 100 ETF (TFSA)" vs
+# "Satrix Nasdaq 100 ETF (ZAR)").  Share-class markers like "(A)" / "(E)" are
+# deliberately NOT stripped — different classes are different assets.
+_ACCOUNT_MARKER_PATTERN = re.compile(
+    r"\s*\([^)]*(?:tfsa|voluntary|volunt|brokerage|tax[\s-]*free|zar|usd|gbp|eur)[^)]*\)"
+    r"|[-–]\s*(?:tfsa|voluntary|volunt|brokerage|tax[\s-]*free|ra)\s*$"
+    r"|\s+(?:tfsa|voluntary|volunt|brokerage|tax[\s-]*free)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _asset_group_key(name: str) -> Optional[str]:
+    """Normalize an investment name into a stable asset identity: account
+    markers removed, share-class identifiers preserved.  Returns None when the
+    result is empty (not groupable)."""
+    n = _ACCOUNT_MARKER_PATTERN.sub(" ", name or "")
+    n = re.sub(r"[^a-z0-9]+", " ", n.lower()).strip()
+    return n or None
+
+
+def _link_price_shares(database_name: str) -> int:
+    """Group investments that hold the same asset (same price source, currency
+    and normalized name) and make them share a single copy of historical
+    prices.
+
+    For each group the member with the most ``unit_prices`` rows (ties → lowest
+    id) becomes the "price master"; every other member gets
+    ``price_source_investment_id`` pointing at it, its own (duplicate) price
+    rows are removed, and its live ``unit_price`` is synced from the master.
+
+    Returns the number of investments newly linked to a master.
+    """
+    from collections import defaultdict
+    from .database import get_db_connection
+
+    linked = 0
+    with get_db_connection(database_name) as (conn, cursor):
+        cursor.execute("""
+            SELECT i.id, i.investment_name, i.unit_currency,
+                   COALESCE(m.source, 'unknown') AS source,
+                   (SELECT COUNT(*) FROM unit_prices up WHERE up.investment_id = i.id) AS price_rows,
+                   COALESCE(i.price_source_investment_id, 0) AS current_master
+            FROM investments i
+            LEFT JOIN investment_source_meta m ON m.investment_id = i.id
+            WHERE i.investment_type <> 'Forex'
+              AND i.investment_ticker <> 'PORTFOLIO'
+            ORDER BY 5 DESC, i.id ASC
+        """)
+        groups: dict[tuple, list] = defaultdict(list)
+        for inv_id, inv_name, currency, source, price_rows, current_master in cursor.fetchall():
+            key = _asset_group_key(inv_name)
+            if key:
+                groups[(source, currency, key)].append((inv_id, price_rows, current_master))
+
+        for (source, currency, key), members in groups.items():
+            if len(members) < 2:
+                continue
+            # Sorted by price_rows DESC, id ASC → first member is the master
+            master_id = members[0][0]
+            for inv_id, price_rows, current_master in members[1:]:
+                if current_master == master_id:
+                    continue
+                cursor.execute(
+                    "UPDATE investments SET price_source_investment_id = %s WHERE id = %s",
+                    (master_id, inv_id)
+                )
+                cursor.execute(
+                    "DELETE FROM unit_prices WHERE investment_id = %s",
+                    (inv_id,)
+                )
+                cursor.execute(
+                    "UPDATE investments SET unit_price = "
+                    "(SELECT unit_price FROM investments WHERE id = %s) WHERE id = %s",
+                    (master_id, inv_id)
+                )
+                linked += 1
+        conn.commit()
+
+    if linked:
+        logger.info(f"🔗 Linked {linked} investment(s) to a shared price master.")
+    return linked
 
 
 def _get_existing_price_dates(database_name: str, investment_id: int) -> set[date]:
@@ -174,6 +259,12 @@ def _fetch_yfinance(ticker: str, start: Optional[date] = None,
     Fetch OHLCV data from yfinance.
     For JSE-listed assets use ticker ending in '.JO' (e.g. 'STXNDQ.JO').
     Returns DataFrame with 'Date' and 'Close' columns (prices in the native currency).
+
+    IMPORTANT: JSE (.JO) Close prices are in Rands, even though
+    ticker.info['currency'] may report 'ZAc' (a known yfinance metadata quirk
+    for JSE stocks). The OHLCV prices themselves are ZAR, so no /100 scaling
+    should be applied — doing so would mix cents with the Rands used for
+    manual data entry.
     """
     try:
         import yfinance as yf
@@ -190,6 +281,19 @@ def _fetch_yfinance(ticker: str, start: Optional[date] = None,
             return pd.DataFrame()
         df = df.reset_index()[["Date", "Close"]].dropna()
         df["Date"] = pd.to_datetime(df["Date"]).dt.date
+
+        # Convert pence-denominated LSE prices to Pounds so stored values match
+        # manual data entry (unit_currency='GBP'). yfinance reports LSE (.L)
+        # Close prices in GBp (pence); t.info['currency'] == 'GBp' (mixed case)
+        # confirms it, while 'GBP' means the prices are already in Pounds.
+        ticker_upper = ticker.upper()
+        if ticker_upper.endswith((".L", ".LN")):
+            try:
+                if t.info.get("currency") in ("GBp", "GBX"):
+                    df["Close"] = df["Close"] / 100.0
+            except Exception:
+                pass
+
         return df
     except Exception as e:
         logger.warning(f"yfinance error for {ticker}: {e}")
@@ -314,6 +418,12 @@ def _determine_source_and_ticker(inv: dict) -> tuple[str, str]:
 
 def fetch_current_price(inv: dict, database_name: str) -> Optional[float]:
     """Fetch today's price for a single investment and persist it."""
+    # Investments that share another investment's price history are covered by
+    # their price master — no point fetching the same series twice.
+    if inv.get("price_source_investment_id"):
+        logger.info(f"  [{inv['investment_name']}] Shares price history with another account — skipped.")
+        return None
+
     source, effective_ticker = _determine_source_and_ticker(inv)
     price: Optional[float] = None
 
@@ -364,6 +474,11 @@ def backfill_historical_prices(inv: dict, database_name: str,
     For yfinance, it fetches ALL history in one go (full backfill).
     For profiledata, it fetches 10 days per run using the backwards cursor.
     """
+    # Shared investments are backfilled via their price master.
+    if inv.get("price_source_investment_id"):
+        logger.info(f"  [{inv['investment_name']}] Shares price history with another account — skipped.")
+        return 0
+
     source, effective_ticker = _determine_source_and_ticker(inv)
     if source == "none":
         return 0
@@ -483,6 +598,7 @@ def run_daily_price_fetch(database_name: str):
     logger.info("=" * 60)
 
     try:
+        _link_price_shares(database_name)
         investments = _get_investments(database_name)
     except Exception as e:
         logger.error(f"Failed to load investments: {e}")
@@ -492,6 +608,9 @@ def run_daily_price_fetch(database_name: str):
     total_history = 0
 
     for inv in investments:
+        # Shared investments are covered by their price master.
+        if inv.get("price_source_investment_id"):
+            continue
         try:
             # 1. Today's price
             p = fetch_current_price(inv, database_name)
@@ -566,13 +685,26 @@ def fetch_prices_now(database_name: str, investment_id: Optional[int] = None) ->
     """
     Manually trigger a price fetch (current + backfill batch).
     If investment_id is None, processes all investments.
+    Investments holding the same asset in another account share their price
+    history with a "price master" and are skipped here.
     """
+    _link_price_shares(database_name)
+
     investments = _get_investments(database_name)
     if investment_id is not None:
         investments = [i for i in investments if i["id"] == investment_id]
 
     results = []
     for inv in investments:
+        if inv.get("price_source_investment_id"):
+            results.append({
+                "investment_name": inv["investment_name"],
+                "current_price": None,
+                "historical_stored": 0,
+                "note": "shares price history with another account — skipped",
+            })
+            continue
+
         current_price = fetch_current_price(inv, database_name)
         backfilled = backfill_historical_prices(inv, database_name)
         results.append({

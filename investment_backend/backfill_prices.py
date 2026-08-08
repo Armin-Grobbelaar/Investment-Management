@@ -24,6 +24,7 @@ cursor.execute("""
     JOIN investment_source_meta m ON m.investment_id = i.id
     WHERE m.source = 'yfinance'
       AND i.investment_type != 'Forex'
+      AND i.price_source_investment_id IS NULL
 """)
 investments = cursor.fetchall()
 print(f"Found {len(investments)} yfinance investments to backfill\n")
@@ -43,11 +44,16 @@ for inv_id, name, ticker, currency in investments:
             continue
 
         count = 0
+        # LSE (.L) tickers are quoted in GBp (pence) by yfinance; convert to
+        # Pounds so stored prices match manual entries (unit_currency='GBP').
+        lse_in_pence = ticker.upper().endswith((".L", ".LN")) and currency == "GBP"
         for idx, row in data.iterrows():
             d = idx.date() if hasattr(idx, 'date') else idx
             try:
                 close_val = row['Close']
                 price = float(close_val.iloc[0] if hasattr(close_val, 'iloc') else close_val)
+                if lse_in_pence:
+                    price = price / 100.0
             except Exception:
                 continue
 

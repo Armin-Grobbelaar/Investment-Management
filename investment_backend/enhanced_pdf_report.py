@@ -115,7 +115,7 @@ class InvestmentPDFReport:
         with get_db_connection(self.database_name) as (conn, cursor):
             cursor.execute("""
                 SELECT unit_price_date, unit_price
-                FROM unit_prices
+                FROM v_investment_prices
                 WHERE investment_id = %s
                 ORDER BY unit_price_date
             """, (investment_id,))

@@ -29,6 +29,8 @@ import { Bar } from "react-chartjs-2";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, ChartTooltip, Legend);
 
+const DB_NAME = process.env.NEXT_PUBLIC_DB_NAME || 'Investments';
+
 // ── Palette ──────────────────────────────────────────────────────────────────
 const positiveColor = (irr: number | null) => {
     if (irr === null || irr === undefined) return "#607D8B";
@@ -112,7 +114,7 @@ export default function IRRAnalysis() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get("/api/irr/Investments?base_currency=ZAR");
+                const res = await axios.get(`/api/irr/${DB_NAME}?base_currency=ZAR`);
                 setData(res.data);
                 if (res.data.error) setError(res.data.error);
             } catch (err: any) {

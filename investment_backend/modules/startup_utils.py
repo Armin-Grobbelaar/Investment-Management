@@ -4,6 +4,7 @@ Startup Utilities Module
 Functions for system startup, database initialization, and health checks.
 """
 
+import re
 import psycopg2
 from .database import DB_HOST, DB_USER, DB_PASSWORD, DB_PORT, DEFAULT_DB
 from .portfolio import ensure_portfolio_exists, update_portfolio
@@ -57,6 +58,10 @@ def check_database_exists(db_name):
 
 def create_database_if_not_exists(db_name):
     """Create database if it doesn't exist."""
+    # Sanitize the database identifier before it is interpolated into SQL.
+    # CREATE DATABASE cannot be parameterised, so only allow safe identifier
+    # characters (alphanumeric, underscore, dollar) and replace everything else.
+    db_name = re.sub(r'[^a-zA-Z0-9_$]', '_', db_name)
     print(f"📊 Checking database '{db_name}'...")
     
     if check_database_exists(db_name):
