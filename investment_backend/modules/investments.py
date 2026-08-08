@@ -63,14 +63,6 @@ def add_investment(
 
             print(f"Added investment '{investment_name}' with ID {investment_id}.")
 
-            # If the same asset is already held in another account, share its
-            # price history instead of storing a second copy.
-            linked = _link_new_investment_to_price_master(
-                database_name, investment_id, investment_name, unit_currency, investment_type
-            )
-            if linked:
-                print(f"Linked '{investment_name}' to shared price master (investment {linked}).")
-
             # Fetch and store historical data is now handled asynchronously by fetch_prices_now
             # via BackgroundTasks in the FastAPI endpoint
 
@@ -79,6 +71,17 @@ def add_investment(
 
             # Commit all changes
             conn.commit()
+
+            # If the same asset is already held in another account, share its
+            # price history instead of storing a second copy. This must run
+            # AFTER the commit above: the linker opens its own connection, and
+            # running it earlier targeted an uncommitted row that connection
+            # could not see (the UPDATE/DELETE silently affected 0 rows).
+            linked = _link_new_investment_to_price_master(
+                database_name, investment_id, investment_name, unit_currency, investment_type
+            )
+            if linked:
+                print(f"Linked '{investment_name}' to shared price master (investment {linked}).")
 
             # Update investment metrics - after commit so it's visible to other connections
             try:
@@ -126,8 +129,11 @@ def _link_new_investment_to_price_master(database_name: str, investment_id, inve
                 (master_id, investment_id)
             )
             cursor.execute(
+                # If the master has a NULL unit_price, keep the child's own
+                # price rather than overwriting it with NULL.
                 "UPDATE investments SET unit_price = "
-                "(SELECT unit_price FROM investments WHERE id = %s) WHERE id = %s",
+                "COALESCE((SELECT unit_price FROM investments WHERE id = %s), unit_price) "
+                "WHERE id = %s",
                 (master_id, investment_id)
             )
             cursor.execute("DELETE FROM unit_prices WHERE investment_id = %s", (investment_id,))
