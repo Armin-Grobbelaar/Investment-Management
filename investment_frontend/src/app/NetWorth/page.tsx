@@ -98,7 +98,7 @@ export default function NetWorthTracker() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=R`);
+                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=ZAR`);
                 setData(res.data);
             } catch (err: any) {
                 setError(err.message || "Failed to load net worth data");
@@ -291,7 +291,7 @@ export default function NetWorthTracker() {
                                                 size="small"
                                             />
                                             <Chip
-                                                label={data.base_currency}
+                                                label={data.base_currency === 'ZAR' ? 'R' : data.base_currency}
                                                 sx={{ backgroundColor: "rgba(255,255,255,0.12)", color: "#fff" }}
                                                 size="small"
                                             />

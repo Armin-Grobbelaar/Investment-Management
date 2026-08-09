@@ -315,6 +315,11 @@ def get_investment_data(base_currency: str = None,
     if base_currency is None:
         base_currency = DEFAULT_BASE_CURRENCY
 
+    # Accept display symbols ('R') as well as ISO codes ('ZAR') by resolving
+    # symbols to their ISO code before validation/conversion.
+    if isinstance(base_currency, str):
+        base_currency = CURRENCY_SYMBOLS.get(base_currency.strip().upper(), base_currency.strip().upper())
+
     if base_currency not in SUPPORTED_BASE_CURRENCIES:
         raise ValueError(f"Base currency '{base_currency}' not supported. Available: {SUPPORTED_BASE_CURRENCIES}")
 

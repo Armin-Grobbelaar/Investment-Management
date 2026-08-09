@@ -31,6 +31,15 @@ def resolve_currency_code(value: str) -> str:
     return value.upper()
 
 
+def currency_display_symbol(code: str) -> str:
+    """Return the display symbol for an ISO currency code (e.g. 'ZAR' -> 'R')."""
+    code = resolve_currency_code(code).upper()
+    for symbol, iso in CURRENCY_SYMBOLS.items():
+        if iso == code:
+            return symbol
+    return code
+
+
 # ISO code for the configured base currency (used for "local" metrics and
 # for converting foreign investment cash flows into the reporting currency).
 BASE_CURRENCY_CODE = resolve_currency_code(DEFAULT_BASE_CURRENCY)
@@ -140,6 +149,11 @@ def convert_investment_data_for_display(df: pd.DataFrame, base_currency: str = N
     """
     if base_currency is None:
         base_currency = DEFAULT_BASE_CURRENCY
+
+    # Accept display symbols ('R') as well as ISO codes ('ZAR') by resolving
+    # symbols to their ISO code before validation/conversion.
+    if isinstance(base_currency, str):
+        base_currency = resolve_currency_code(base_currency)
 
     if df.empty or base_currency not in SUPPORTED_BASE_CURRENCIES:
         return df

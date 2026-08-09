@@ -114,7 +114,7 @@ export default function IRRAnalysis() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get(`/api/irr/${DB_NAME}?base_currency=R`);
+                const res = await axios.get(`/api/irr/${DB_NAME}?base_currency=ZAR`);
                 setData(res.data);
                 if (res.data.error) setError(res.data.error);
             } catch (err: any) {

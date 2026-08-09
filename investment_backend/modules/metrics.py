@@ -31,7 +31,7 @@ GOOD_VOLATILITY_THRESHOLD = _cfg_float("GOOD_VOLATILITY_THRESHOLD", "good_volati
 PREDICTION_ACCURACY_GOOD_THRESHOLD = _cfg_float("PREDICTION_ACCURACY_GOOD", "prediction_accuracy_good", 5.0)
 PREDICTION_ACCURACY_ACCEPTABLE_THRESHOLD = _cfg_float("PREDICTION_ACCURACY_ACCEPTABLE", "prediction_accuracy_acceptable", 15.0)
 CURRENCY_COUNTRY_MAP = {
-    'R': os.environ.get("COUNTRY_R", "South Africa"),
+    'ZAR': os.environ.get("COUNTRY_ZAR", "South Africa"),
     'USD': os.environ.get("COUNTRY_USD", "United States"),
     'GBP': os.environ.get("COUNTRY_GBP", "United Kingdom"),
     'EUR': os.environ.get("COUNTRY_EUR", "Euro Area")

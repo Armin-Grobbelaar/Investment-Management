@@ -31,6 +31,7 @@ from .csv_import import (
 from .predictions import get_investment_predictions
 from .reporting import generate_investment_pdf_report
 from .metrics import get_investment_metrics_data, get_investment_metrics_by_name_data
+from .currency import currency_display_symbol
 from .database import add_user as add_user_db
 
 
@@ -85,10 +86,13 @@ class AddInvestmentRequest(BaseModel):
     investment_fee: float
     investment_status: str
 
-def get_dashboard_data(database_name: str, base_currency: str = "R"):
+def get_dashboard_data(database_name: str, base_currency: str = "ZAR"):
     """
     Get optimized dashboard data with caching.
     """
+    # Normalize display symbols ('R') to ISO codes ('ZAR').
+    from .currency import resolve_currency_code
+    base_currency = resolve_currency_code(base_currency or "")
     cache_key = _get_cache_key("dashboard_data", {
         "database": database_name,
         "base_currency": base_currency
@@ -157,10 +161,14 @@ def get_dashboard_data(database_name: str, base_currency: str = "R"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard data: {str(e)}")
 
-def get_investment_timeseries_data(database_name: str, base_currency: str = "R", investment_name: str = None):
+def get_investment_timeseries_data(database_name: str, base_currency: str = "ZAR", investment_name: str = None):
     """
-    Get optimized time series data for charts with caching.
+    Get investment timeseries data for line charts.
     """
+    # Normalize display symbols ('R') to ISO codes ('ZAR').
+    from .currency import resolve_currency_code
+    base_currency = resolve_currency_code(base_currency or "")
+
     cache_key = _get_cache_key("timeseries", {
         "database": database_name,
         "base_currency": base_currency,
@@ -472,10 +480,14 @@ def health_check_api():
         "uptime_seconds": (datetime.now() - datetime.strptime("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")).total_seconds()
     }
 
-def get_investment_metrics_api(database_name: str, base_currency: str = "R", filter: str = "portfolio"):
+def get_investment_metrics_api(database_name: str, base_currency: str = "ZAR", filter: str = "portfolio"):
     """
-    Return real investment metrics from the database.
+    Get comprehensive investment metrics data.
     """
+    # Normalize display symbols ('R') to ISO codes ('ZAR').
+    from .currency import resolve_currency_code
+    base_currency = resolve_currency_code(base_currency or "")
+
     try:
         metrics_data = get_investment_metrics_data(database_name, base_currency, filter)
 
@@ -577,12 +589,15 @@ def _get_blue_color_for_area_chart(index: int) -> str:
     return AREA_CHART_COLORS[index % len(AREA_CHART_COLORS)]
 
 
-def get_dashboard_charts_api(database_name: str, base_currency: str = "R",
+def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
                              filter_type: str = None, filter_value: str = None):
     """
     Get pre-processed chart data for frontend - all aggregations done server-side.
     Returns ready-to-use pie chart data and aggregated tables.
     """
+    # Normalize display symbols ('R') to ISO codes ('ZAR').
+    from .currency import resolve_currency_code
+    base_currency = resolve_currency_code(base_currency or "")
    
     cache_key = f"charts:{database_name}:{base_currency}"
 
@@ -874,13 +889,13 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "R",
                 "metric": "Total Net Worth",
                 "value": round(total_individual, 2),
                 "unit": base_currency,
-                "formatted_value": f"{base_currency} {round(total_individual, 2):,.2f}"
+                "formatted_value": f"{currency_display_symbol(base_currency)} {round(total_individual, 2):,.2f}"
             },
             {
                 "metric": "Total Contributions",
                 "value": round(0.0, 2),
                 "unit": base_currency,
-                "formatted_value": f"{base_currency} {round(0.0, 2):,.2f}"
+                "formatted_value": f"{currency_display_symbol(base_currency)} {round(0.0, 2):,.2f}"
             },
             {
                 "metric": "Total Investment Time",
