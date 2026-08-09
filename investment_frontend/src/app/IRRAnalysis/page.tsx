@@ -107,7 +107,7 @@ export default function IRRAnalysis() {
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
     const menuItems = [
-        { heading: "Navigation", items: ["Dashboard", "Net Worth", "IRR Analysis", "Metrics", "Predictions", "Edit Data"], urls: ["/Investments", "/NetWorth", "/IRRAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions", "/EditInvestmentData"] }
+        { heading: "Navigation", items: ["Dashboard", "Net Worth", "IRR Analysis", "Property Analysis", "Metrics", "Predictions", "Edit Data"], urls: ["/Investments", "/NetWorth", "/IRRAnalysis", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions", "/EditInvestmentData"] }
     ];
 
     useEffect(() => {
@@ -447,6 +447,9 @@ export default function IRRAnalysis() {
                                     </Link>
                                     <Link href="/Investments" style={{ textDecoration: "none" }}>
                                         <Chip label="Dashboard" clickable variant="outlined" />
+                                    </Link>
+                                    <Link href="/PropertyAnalysis" style={{ textDecoration: "none" }}>
+                                        <Chip label="🏠 Property Analysis" clickable color="secondary" />
                                     </Link>
                                     <Link href="/ViewInvestmentMetrics" style={{ textDecoration: "none" }}>
                                         <Chip label="Metrics →" clickable variant="outlined" />

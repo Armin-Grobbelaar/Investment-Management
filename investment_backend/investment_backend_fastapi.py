@@ -826,6 +826,14 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
             database_name=database_name
         )
 
+        # Ensure unit_price_date is datetime and investment_value is numeric float to avoid type comparison errors
+        if not timeseries_df.empty:
+            if "unit_price_date" in timeseries_df.columns:
+                timeseries_df["unit_price_date"] = pd.to_datetime(timeseries_df["unit_price_date"], errors='coerce')
+                timeseries_df = timeseries_df.dropna(subset=["unit_price_date"])
+            if "investment_value" in timeseries_df.columns:
+                timeseries_df["investment_value"] = pd.to_numeric(timeseries_df["investment_value"], errors='coerce').fillna(0.0)
+
         # Apply filtering if filter parameters are provided
         # IMPORTANT: Filter summary data but use same investment names for timeseries
         # even if some investments don't have historical data
@@ -876,8 +884,12 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                     "borderColour": getBlueColor(investment_index)  # Assign blue colors server-side
                 })
 
-            # Set date range
-            min_date = timeseries_df["unit_price_date"].min()
+            # Trim date range to the first non-zero investment value date
+            nonzero_df = timeseries_df[timeseries_df["investment_value"] > 0.01]
+            if not nonzero_df.empty:
+                min_date = nonzero_df["unit_price_date"].min()
+            else:
+                min_date = timeseries_df["unit_price_date"].min()
             max_date = timeseries_df["unit_price_date"].max()
 
             timeseries_date_range = {

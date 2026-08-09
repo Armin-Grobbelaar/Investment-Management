@@ -1,80 +1,84 @@
 "use client";
 import React from 'react';
 import { Pie } from 'react-chartjs-2';
-import { Chart, ArcElement } from 'chart.js';
-import { ThemeProvider } from '@mui/material/styles';
-import { brandingDarkTheme, brandingLightTheme } from '@/app/Themes/muiTheme';
-Chart.register(ArcElement);
+import { Chart, ArcElement, Tooltip, Legend, Title } from 'chart.js';
+import { Box, Typography } from '@mui/material';
+
+Chart.register(ArcElement, Tooltip, Legend, Title);
 
 interface PieChartData {
-    labels: string[];
-    datasets: {
-      data: number[];
-      backgroundColor: string[];
-    }[];
-  }
+  labels: string[];
+  datasets: {
+    data: number[];
+    backgroundColor: string[];
+  }[];
+}
 
 interface Props {
-    data: PieChartData | null;
-    title?: string;
-    theme?: 'light' | 'dark'; 
+  data: PieChartData | null;
+  title?: string;
+  theme?: 'light' | 'dark';
 }
 
 const PieChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
-    if (!data || !data.labels || data.labels.length === 0) {
-        return null;
-    }
-    const options = {
-        plugins: {
-            legend: {
-                display: true,
-                labels: {
-                    boxWidth: 15,
-                    usePointStyle: true,
-                },
-            },
-        },
-    };
-
-    // Adjust outlineColor based on theme
-    const outlineColor = theme === 'dark' ? 'white' : 'black';
-    const customElements = [{
-        afterDraw(chart: any) {
-            const { ctx } = chart;
-            const { chartArea } = chart;
-            ctx.save();
-            ctx.strokeStyle = outlineColor;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.rect(
-                chartArea.left,
-                chartArea.top,
-                chartArea.right - chartArea.left,
-                chartArea.bottom - chartArea.top
-            );
-            ctx.stroke();
-            ctx.restore();
-        }
-    }];
-
-    const chartOptions = {
-        ...options,
-        plugins: {
-            ...options.plugins,
-            customElements,
-        },
-    };
-
+  if (!data || !data.labels || data.labels.length === 0) {
     return (
-        <div>
-            <h2>{title}</h2>
-            <div style={{ height: '400px', width: '400px' }}>
-                <ThemeProvider theme={theme === 'dark' ? brandingDarkTheme : brandingLightTheme}>
-                    <Pie data={data} options={chartOptions} />
-                </ThemeProvider>
-            </div>
-        </div>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%' }}>
+        <Typography variant="body2" color="textSecondary">
+          No data available for {title || 'chart'}
+        </Typography>
+      </Box>
     );
+  }
+
+  const isDark = theme === 'dark';
+  const textColor = isDark ? '#e0e0e0' : '#2c3e50';
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom' as const,
+        labels: {
+          color: textColor,
+          boxWidth: 12,
+          padding: 10,
+          font: {
+            size: 11,
+            family: 'Roboto, sans-serif'
+          },
+          usePointStyle: true,
+        },
+      },
+      title: {
+        display: false,
+      },
+      tooltip: {
+        callbacks: {
+          label: (context: any) => {
+            const label = context.label || '';
+            const value = context.parsed || 0;
+            return `${label}: ${value.toFixed(2)}%`;
+          }
+        }
+      }
+    },
+  };
+
+  return (
+    <Box sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      {title && title.trim().length > 0 && (
+        <Typography variant="h6" align="center" sx={{ mb: 1, fontWeight: 'bold', color: textColor }}>
+          {title}
+        </Typography>
+      )}
+      <Box sx={{ flex: 1, width: '100%', minHeight: '260px', maxHeight: '340px', position: 'relative' }}>
+        <Pie data={data} options={chartOptions} />
+      </Box>
+    </Box>
+  );
 };
 
 export default PieChart;
