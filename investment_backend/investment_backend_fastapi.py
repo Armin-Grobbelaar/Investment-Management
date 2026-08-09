@@ -784,7 +784,9 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
         """Get a blue-themed color for area charts."""
         return AREA_CHART_COLORS[index % len(AREA_CHART_COLORS)]
 
-    cache_key = f"charts:{database_name}:{base_currency}"
+    # Filtered requests must never share the unfiltered cache entry (otherwise
+    # clicking "ETF" etc. in the sidebar returns the full portfolio).
+    cache_key = f"charts:{database_name}:{base_currency}:{filter_type or ''}:{filter_value or ''}"
 
     # Check cache first
     cached_data = _get_cached_data(cache_key)
@@ -798,6 +800,19 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
     try:
         # Get raw investment summary data (for currency pie chart in original currencies)
         raw_summary_df = get_investment_summary(database_name=database_name)
+
+        # Keep an unfiltered copy for the sidebar menu, which must always show
+        # every portfolio option regardless of the current filter.
+        full_summary_df = raw_summary_df.copy()
+
+        # Unfiltered breakdown groups, used for the sidebar menu and for the
+        # allocation bar charts even when a filter is active (those groups are
+        # only computed for non-filtered dimensions below).
+        full_type_groups = full_summary_df.groupby("investment_type")["investment_value"].sum().reset_index()
+        full_currency_groups = full_summary_df.groupby("unit_currency")["investment_value"].sum().reset_index()
+        full_institution_groups = full_summary_df.groupby("institution_name")["investment_value"].sum().reset_index().sort_values(
+            "investment_value", ascending=False
+        )
 
         # Get currency-converted summary data (for most charts/tables)
         summary_df = get_investment_summary_display(
@@ -821,17 +836,17 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 filtered_summary = raw_summary_df[raw_summary_df["investment_type"] == filter_value]
                 filtered_investment_names = filtered_summary["investment_name"].tolist()
                 raw_summary_df = filtered_summary
-                summary_df = summary_df[summary_df["investment_type"] == filter_value]
+                summary_df = summary_df[summary_df["investment_name"].isin(filtered_investment_names)]
             elif filter_type == "unit_currency":
                 filtered_summary = raw_summary_df[raw_summary_df["unit_currency"] == filter_value]
                 filtered_investment_names = filtered_summary["investment_name"].tolist()
                 raw_summary_df = filtered_summary
-                summary_df = summary_df[summary_df["unit_currency"] == filter_value]
+                summary_df = summary_df[summary_df["investment_name"].isin(filtered_investment_names)]
             elif filter_type == "institution_name":
                 filtered_summary = raw_summary_df[raw_summary_df["institution_name"] == filter_value]
                 filtered_investment_names = filtered_summary["investment_name"].tolist()
                 raw_summary_df = filtered_summary
-                summary_df = summary_df[summary_df["institution_name"] == filter_value]
+                summary_df = summary_df[summary_df["investment_name"].isin(filtered_investment_names)]
 
             # Filter timeseries data but allow missing investments (they'll just have empty graphs)
             if filtered_investment_names:
@@ -1117,11 +1132,13 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
         area_charts = []
 
         # 1. Bar chart: Portfolio allocation by investment type (horizontal bar)
-        if not type_groups.empty:
+        # Use the full portfolio groups so this chart is always available even
+        # when a type/currency filter is active.
+        if not full_type_groups.empty:
             type_allocation_data = pd.DataFrame({
-                'type': type_groups["investment_type"],
-                'value': type_groups["investment_value"],
-                'percentage': [(val / total_type * 100) if total_type > 0 else 0 for val in type_groups["investment_value"]]
+                'type': full_type_groups["investment_type"],
+                'value': full_type_groups["investment_value"],
+                'percentage': [(val / full_type_groups["investment_value"].sum() * 100) if full_type_groups["investment_value"].sum() > 0 else 0 for val in full_type_groups["investment_value"]]
             })
 
             bar_charts.append({
@@ -1138,11 +1155,11 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
             })
 
         # 2. Bar chart: Portfolio allocation by currency
-        if not raw_currency_groups.empty:
+        if not full_currency_groups.empty:
             currency_allocation_data = pd.DataFrame({
-                'currency': raw_currency_groups["unit_currency"],
-                'value': raw_currency_groups["investment_value"],
-                'percentage': [(val / total_raw_currency * 100) if total_raw_currency > 0 else 0 for val in raw_currency_groups["investment_value"]]
+                'currency': full_currency_groups["unit_currency"],
+                'value': full_currency_groups["investment_value"],
+                'percentage': [(val / full_currency_groups["investment_value"].sum() * 100) if full_currency_groups["investment_value"].sum() > 0 else 0 for val in full_currency_groups["investment_value"]]
             })
 
             bar_charts.append({
@@ -1216,26 +1233,23 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
             area_charts = []
 
         # Generate dynamic menu items based on actual portfolio data
-        # Only show what's actually in their portfolio
-        unique_types = get_investment_types_in_portfolio(database_name) if 'get_investment_types_in_portfolio' in globals() else type_groups["investment_type"].unique().tolist()
-        unique_currencies = get_currencies_in_portfolio(database_name) if 'get_currencies_in_portfolio' in globals() else raw_currency_groups["unit_currency"].unique().tolist()
-        institution_names = institution_groups["institution_name"].unique().tolist()
-
+        # Only show what's actually in their portfolio (always the FULL portfolio,
+        # not the currently-filtered subset, so the sidebar stays consistent).
         menu_items = [
             {
                 "heading": "Investment Type",
-                "items": type_groups["investment_type"].tolist(),
-                "urls": [f"/Investments/InvestmentsType/{item.replace(' ', '%20')}" for item in type_groups["investment_type"].tolist()]
+                "items": full_type_groups["investment_type"].tolist(),
+                "urls": [f"/Investments/InvestmentsType/{item.replace(' ', '%20')}" for item in full_type_groups["investment_type"].tolist()]
             },
             {
                 "heading": "Investment Currency",
-                "items": raw_currency_groups["unit_currency"].tolist(),  # Match the currency table
-                "urls": [f"/Investments/InvestmentsCurrency/{item.replace(' ', '%20')}" for item in raw_currency_groups["unit_currency"].tolist()]
+                "items": full_currency_groups["unit_currency"].tolist(),  # Match the currency table
+                "urls": [f"/Investments/InvestmentsCurrency/{item.replace(' ', '%20')}" for item in full_currency_groups["unit_currency"].tolist()]
             },
             {
                 "heading": "Institution",
-                "items": institution_groups["institution_name"].head(10).tolist(),  # Show more institutions
-                "urls": [f"/Investments/InvestmentsInstitution/{item.replace(' ', '%20')}" for item in institution_groups["institution_name"].head(10).tolist()]
+                "items": full_institution_groups["institution_name"].head(10).tolist(),  # Show more institutions
+                "urls": [f"/Investments/InvestmentsInstitution/{item.replace(' ', '%20')}" for item in full_institution_groups["institution_name"].head(10).tolist()]
             }
         ]
 

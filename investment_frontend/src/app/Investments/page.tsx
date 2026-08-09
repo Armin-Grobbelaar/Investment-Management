@@ -252,7 +252,7 @@ function AllInvestments() {
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
       <div>
         {isLoaded ? (
-          <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', transition: 'background-color 0.3s' }}>
+          <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh', transition: 'background-color 0.3s' }}>
             <DrawerComponent menuItems={menuItems} />
             <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
@@ -491,7 +491,7 @@ function AllInvestments() {
             </Container>
           </div>
         ) : (
-          <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.3s' }}>
+          <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.3s' }}>
             <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
             </IconButton>

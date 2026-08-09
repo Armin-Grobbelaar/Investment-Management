@@ -107,7 +107,7 @@ export default function FilteredCurrencyPage() {
   if (loading) {
     return (
       <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
-        <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
             {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
           </IconButton>
@@ -124,7 +124,7 @@ export default function FilteredCurrencyPage() {
 
   return (
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
-      <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh' }}>
+      <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh' }}>
         <DrawerComponent menuItems={menuItems} />
         <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '10px', right: '10px' }}>
           {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
