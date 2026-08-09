@@ -10,6 +10,7 @@ export const metadata: Metadata = {
   description: "See all investments in one place",
 };
 
+import SideMenyDrawer from "./Reusable Components/Drawers/SideMenyDrawer";
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -17,8 +18,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
-          </html>
+      <body className={inter.className}>
+          <SideMenyDrawer />
+          {children}
+      </body>
+    </html>
   );
 }
 

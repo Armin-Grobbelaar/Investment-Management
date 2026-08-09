@@ -72,8 +72,7 @@ interface NetWorthData {
 }
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
-const fmt = (n: number, currency = "ZAR") =>
-    new Intl.NumberFormat("en-ZA", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+const fmt = (n: number) => `R ${new Intl.NumberFormat("en-ZA", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n)}`;
 
 const fmtShort = (n: number) => {
     if (n >= 1_000_000) return `R${(n / 1_000_000).toFixed(2)}M`;

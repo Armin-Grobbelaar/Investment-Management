@@ -347,6 +347,11 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
 
               {/* Bottom Action Navigation Buttons */}
               <Box sx={{ mt: 5, display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Link href="/Factsheets" passHref>
+                  <Button variant="contained" color="info" size="large" sx={{ minWidth: 150 }}>
+                    📄 Factsheets
+                  </Button>
+                </Link>
                 <Link href="/NetWorth" passHref>
                   <Button variant="contained" color="success" size="large" sx={{ minWidth: 150 }}>
                     💰 Net Worth

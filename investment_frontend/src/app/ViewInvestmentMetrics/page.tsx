@@ -128,9 +128,6 @@ export default function EnhancedViewInvestmentMetrics() {
     const [metricsData, setMetricsData] = useState<any>(null);
     const [comparisonData, setComparisonData] = useState<any>(null);
     const [chartTab, setChartTab] = useState<number>(0);
-    const [menuItems] = useState<any[]>([
-        { heading: "Tools & Analysis", items: ["Dashboard", "Factsheets", "Property Analysis", "Monte Carlo Simulations"], urls: ["/Investments", "/Factsheets", "/PropertyAnalysis", "/ViewInvestmentPredictions"] }
-    ]);
 
     const toggleDarkMode = () => setDarkMode(prev => !prev);
     const theme = darkMode ? brandingDarkTheme : brandingLightTheme;
@@ -242,7 +239,15 @@ export default function EnhancedViewInvestmentMetrics() {
     const currentDimension = DIMENSIONS[dimensionType];
     const dimensionOptions = currentDimension.arrayName ? (dimensionData?.[currentDimension.arrayName] || []) : [];
 
-    const fmtCurrency = (val: number) => val == null ? 'N/A' : new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }).format(val);
+    const thresholds = metricsData?.thresholds || {
+        excellent_sharpe: 1.2,
+        good_sharpe: 0.8,
+        good_volatility: 0.15,
+        excellent_cagr: 0.15,
+        good_cagr: 0.08
+    };
+
+    const fmtCurrency = (val: number) => val == null ? 'N/A' : new Intl.NumberFormat('en-ZA', { style: 'currency', currency: metricsData?.base_currency || 'ZAR', maximumFractionDigits: 0 }).format(val);
     const fmtPct = (val: number) => val == null ? 'N/A' : `${Number(val).toFixed(2)}%`;
     const fmtDecimal = (val: number) => val == null ? 'N/A' : Number(val).toFixed(4);
 
@@ -289,6 +294,22 @@ export default function EnhancedViewInvestmentMetrics() {
     const latestTaxRatio = getLatest('tax_analysis', 'tax_ratio', 0);
     const totalTax = getLatest('tax_analysis', 'total_tax', 0);
 
+    const getVolColor = (vol: number) => {
+        const threshold = thresholds.good_volatility * 100; // Volatility is returned as percentage, wait, let's check
+        // In backend metrics.py:
+        // sigma = float(np.std(returns, ddof=1)) * np.sqrt(12) * 100
+        // Wait, is it multiplied by 100 in metrics.py? Let's check how latestVol is formatted in frontend.
+        // It's formatted with fmtPct (e.g. "15.00%"). So vol is e.g. 15.0.
+        // thresholds.good_volatility is e.g. 0.15. So thresholds.good_volatility * 100 = 15.0.
+        const goodVol = thresholds.good_volatility * 100;
+        const badVol = goodVol * 1.5;
+        return vol > badVol ? 'error.main' : vol > goodVol ? 'warning.main' : 'success.main';
+    };
+
+    const getSharpeColor = (sharpe: number) => {
+        return sharpe >= thresholds.excellent_sharpe ? 'success.main' : sharpe >= thresholds.good_sharpe ? 'warning.main' : 'error.main';
+    };
+
     const MetricCard = ({ bg, icon, label, value, sub }: { bg: string; icon: React.ReactNode; label: string; value: React.ReactNode; sub?: React.ReactNode }) => (
         <Card sx={{ borderRadius: 2, background: bg, color: 'white', flex: { xs: '0 0 calc(50% - 8px)', md: '0 0 calc(25% - 12px)' } }}>
             <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: '16px !important' }}>
@@ -319,7 +340,7 @@ export default function EnhancedViewInvestmentMetrics() {
             <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pb: 6, pt: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', px: { xs: 2, md: 3 }, mb: 4, alignItems: 'center' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <DrawerComponent menuItems={menuItems} />
+                        <DrawerComponent />
                         <IconButton onClick={() => router.back()} color="inherit" size="large"><KeyboardBackspaceIcon /></IconButton>
                         <Typography variant="h4" sx={{ fontWeight: 'bold', fontSize: { xs: '1.3rem', md: '2rem' } }}>
                             <ShowChartIcon sx={{ mr: 1, verticalAlign: 'middle', fontSize: 36, color: 'primary.main' }} /> Portfolio Metrics
@@ -370,8 +391,8 @@ export default function EnhancedViewInvestmentMetrics() {
 
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>
                                 <MiniCard label="Dividend Yield" value={fmtPct(latestDividendYield)} color="primary.main" />
-                                <MiniCard label="Volatility (12m)" value={fmtPct(latestVol)} color={latestVol > 20 ? 'error.main' : latestVol > 10 ? 'warning.main' : 'success.main'} />
-                                <MiniCard label="Sharpe Ratio" value={fmtDecimal(latestSharpe)} color={latestSharpe > 1 ? 'success.main' : latestSharpe > 0 ? 'warning.main' : 'error.main'} />
+                                <MiniCard label="Volatility (12m)" value={fmtPct(latestVol)} color={getVolColor(latestVol)} />
+                                <MiniCard label="Sharpe Ratio" value={fmtDecimal(latestSharpe)} color={getSharpeColor(latestSharpe)} />
                                 <MiniCard label="Tax Ratio" value={fmtPct(latestTaxRatio)} color="error.main" />
                                 <MiniCard label="Total Tax" value={fmtCurrency(totalTax)} />
                             </Box>

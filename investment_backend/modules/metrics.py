@@ -3,14 +3,33 @@ import numpy as np
 import json
 import os
 from datetime import datetime, date
-from .database import get_db_connection, DEFAULT_DB
+from .database import get_db_connection, DEFAULT_DB, get_config_value
 
-# Configuration constants - configurable via environment
-CAGR_EXCELLENT_THRESHOLD = float(os.environ.get("CAGR_EXCELLENT_THRESHOLD", "0.15"))
-CAGR_GOOD_THRESHOLD = float(os.environ.get("CAGR_GOOD_THRESHOLD", "0.08"))
-CAGR_MODERATE_THRESHOLD = float(os.environ.get("CAGR_MODERATE_THRESHOLD", "0.0"))
-PREDICTION_ACCURACY_GOOD_THRESHOLD = float(os.environ.get("PREDICTION_ACCURACY_GOOD", "5.0"))
-PREDICTION_ACCURACY_ACCEPTABLE_THRESHOLD = float(os.environ.get("PREDICTION_ACCURACY_ACCEPTABLE", "15.0"))
+# Configuration constants - configurable via database (with environment override)
+def _cfg_float(env_key: str, table_key: str, default: float) -> float:
+    """Resolve a float constant: env var first, then config table, then built-in default."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    val = get_config_value(table_key)
+    if val is not None:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+CAGR_EXCELLENT_THRESHOLD = _cfg_float("CAGR_EXCELLENT_THRESHOLD", "cagr_excellent_threshold", 0.15)
+CAGR_GOOD_THRESHOLD = _cfg_float("CAGR_GOOD_THRESHOLD", "cagr_good_threshold", 0.08)
+CAGR_MODERATE_THRESHOLD = _cfg_float("CAGR_MODERATE_THRESHOLD", "cagr_moderate_threshold", 0.0)
+EXCELLENT_SHARPE_RATIO = _cfg_float("EXCELLENT_SHARPE_RATIO", "excellent_sharpe_ratio", 1.2)
+GOOD_SHARPE_RATIO = _cfg_float("GOOD_SHARPE_RATIO", "good_sharpe_ratio", 0.8)
+GOOD_VOLATILITY_THRESHOLD = _cfg_float("GOOD_VOLATILITY_THRESHOLD", "good_volatility_threshold", 0.15)
+PREDICTION_ACCURACY_GOOD_THRESHOLD = _cfg_float("PREDICTION_ACCURACY_GOOD", "prediction_accuracy_good", 5.0)
+PREDICTION_ACCURACY_ACCEPTABLE_THRESHOLD = _cfg_float("PREDICTION_ACCURACY_ACCEPTABLE", "prediction_accuracy_acceptable", 15.0)
 CURRENCY_COUNTRY_MAP = {
     'ZAR': os.environ.get("COUNTRY_ZAR", "South Africa"),
     'USD': os.environ.get("COUNTRY_USD", "United States"),
@@ -52,7 +71,8 @@ def xirr(dates, amounts):
         return total
 
     try:
-        return optimize.newton(npv, 0.1)
+        # Use brentq for more robust root finding in a sensible IRR range [-0.99, 1.0]
+        return optimize.brentq(npv, -0.99, 1.0)
     except:
         return 0.0
 
@@ -1400,7 +1420,14 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 "generated_at": datetime.now().isoformat(),
                 "base_currency": base_currency,
                 "data_points": len(df),
-                "data_source": "DATABASE"
+                "data_source": "DATABASE",
+                "thresholds": {
+                    "excellent_sharpe": EXCELLENT_SHARPE_RATIO,
+                    "good_sharpe": GOOD_SHARPE_RATIO,
+                    "good_volatility": GOOD_VOLATILITY_THRESHOLD,
+                    "excellent_cagr": CAGR_EXCELLENT_THRESHOLD,
+                    "good_cagr": CAGR_GOOD_THRESHOLD
+                }
             }
     
     except Exception as e:

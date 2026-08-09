@@ -50,51 +50,93 @@ _APP_START_TIME = datetime.now()
 # Default database name from environment
 DEFAULT_DB = os.getenv("INVESTMENTS_DB", "Investments")
 
-# Configuration Constants
+# Configuration Constants — loaded from the configuration table (with env-var override)
+# so they can be updated via the settings UI without a code redeploy.
+# The format is: os.environ.get(ENV_KEY) or get_config_value(TABLE_KEY, fallback)
 CACHE_TIMEOUT_SECONDS = int(os.environ.get("CACHE_TIMEOUT_SECONDS", "300"))
 DEFAULT_BASE_CURRENCY = os.environ.get("DEFAULT_BASE_CURRENCY", "ZAR")
-DASHBOARD_DEFAULT_VALUE = float(os.environ.get("DASHBOARD_DEFAULT_VALUE", "100000"))
-SIMULATION_YEARS = int(os.environ.get("SIMULATION_YEARS", "5"))
+
+# --- Simulation / Risk model constants (sourced from DB configuration table) ---
+def _cfg_float(env_key: str, table_key: str, default: float) -> float:
+    """Resolve a float constant: env var first, then config table, then built-in default."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    try:
+        from modules.database import get_config_value as _gcv
+        val = _gcv(table_key)
+        if val is not None:
+            return float(val)
+    except Exception:
+        pass
+    return default
+
+def _cfg_int(env_key: str, table_key: str, default: int) -> int:
+    """Resolve an int constant: env var first, then config table, then built-in default."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        try:
+            return int(env_val)
+        except ValueError:
+            pass
+    try:
+        from modules.database import get_config_value as _gcv
+        val = _gcv(table_key)
+        if val is not None:
+            return int(val)
+    except Exception:
+        pass
+    return default
+
+DASHBOARD_DEFAULT_VALUE = _cfg_float("DASHBOARD_DEFAULT_VALUE", "dashboard_default_value", 100000.0)
+SIMULATION_YEARS = _cfg_int("SIMULATION_YEARS", "default_projection_years", 5)
 SIMULATION_MONTHS = SIMULATION_YEARS * 12
+
+# Rolling year windows — universal constants (1, 3, 5 years), not configurable
 ROLLING_YEARS_1Y = 1
 ROLLING_YEARS_3Y = 3
 ROLLING_YEARS_5Y = 5
-PORTFOLIO_RISK_BASELINE = 1.0
-INDIVIDUAL_RISK_MULTIPLIER = 1.5
-CURRENCY_RISK_MULTIPLIER = 1.2
-TYPE_RISK_MULTIPLIER = 1.3
-INSTITUTION_RISK_MULTIPLIER = 1.4
-PORTFOLIO_DIVIDEND_BASELINE = 0.04
-INDIVIDUAL_DIVIDEND_BASE = 0.04
-FALLBACK_CONTRIBUTION_DIVISOR = float(os.environ.get("FALLBACK_CONTRIBUTION_DIVISOR", "1.27"))
-FALLBACK_INVESTMENT_TIME_YEARS = float(os.environ.get("FALLBACK_INVESTMENT_TIME_YEARS", "1.5"))
-FALLBACK_PORTFOLIO_IRR = float(os.environ.get("FALLBACK_PORTFOLIO_IRR", "9.5"))
-CORRECTION_PROBABILITY_PORTFOLIO = 0.02
-CORRECTION_PROBABILITY_INDIVIDUAL = 0.04
-DAILY_GROWTH_BASELINE = 0.001
-MARKET_CORRECTION_MIN = 0.05
-MARKET_CORRECTION_MAX = 0.15
-VOLATILITY_BASELINE_PORTFOLIO = 0.15
-VOLATILITY_BASELINE_1Y = 0.15
-VOLATILITY_BASELINE_3Y = 0.20
-VOLATILITY_BASELINE_5Y = 0.25
-STD_DEV_MONTHLY = 0.03
-DRAWDOWN_DATA_POINTS = 200
-PERFORMANCE_DATA_POINTS = 48
-ROLLING_1Y_PERIODS = 12
-ROLLING_3Y_PERIODS = 20
-ROLLING_5Y_PERIODS = 10
-VOLATILITY_PERIODS = 24
-SHARPE_PERIODS = 16
-CONTRIBUTION_PERIODS = 60
-DIVIDEND_PERIODS = 60
-AREA_CHART_DAYS = 30
-AREA_CHART_TOP_N = 5
-EXCELLENT_SHARPE_RATIO = 1.2
-GOOD_SHARPE_RATIO = 0.8
-EXCELLENT_RETURN_THRESHOLD = 50.0
-GOOD_RETURN_THRESHOLD = 20.0
-GOOD_VOLATILITY_THRESHOLD = 0.15
+
+PORTFOLIO_RISK_BASELINE = _cfg_float("PORTFOLIO_RISK_BASELINE", "portfolio_risk_baseline", 1.0)
+INDIVIDUAL_RISK_MULTIPLIER = _cfg_float("INDIVIDUAL_RISK_MULTIPLIER", "individual_risk_multiplier", 1.5)
+CURRENCY_RISK_MULTIPLIER = _cfg_float("CURRENCY_RISK_MULTIPLIER", "currency_risk_multiplier", 1.2)
+TYPE_RISK_MULTIPLIER = _cfg_float("TYPE_RISK_MULTIPLIER", "type_risk_multiplier", 1.3)
+INSTITUTION_RISK_MULTIPLIER = _cfg_float("INSTITUTION_RISK_MULTIPLIER", "institution_risk_multiplier", 1.4)
+PORTFOLIO_DIVIDEND_BASELINE = _cfg_float("PORTFOLIO_DIVIDEND_BASELINE", "portfolio_dividend_baseline", 0.04)
+INDIVIDUAL_DIVIDEND_BASE = _cfg_float("INDIVIDUAL_DIVIDEND_BASE", "individual_dividend_base", 0.04)
+FALLBACK_CONTRIBUTION_DIVISOR = _cfg_float("FALLBACK_CONTRIBUTION_DIVISOR", "fallback_contribution_divisor", 1.27)
+FALLBACK_INVESTMENT_TIME_YEARS = _cfg_float("FALLBACK_INVESTMENT_TIME_YEARS", "fallback_investment_time_years", 1.5)
+FALLBACK_PORTFOLIO_IRR = _cfg_float("FALLBACK_PORTFOLIO_IRR", "fallback_portfolio_irr", 9.5)
+CORRECTION_PROBABILITY_PORTFOLIO = _cfg_float("CORRECTION_PROBABILITY_PORTFOLIO", "correction_probability_portfolio", 0.02)
+CORRECTION_PROBABILITY_INDIVIDUAL = _cfg_float("CORRECTION_PROBABILITY_INDIVIDUAL", "correction_probability_individual", 0.04)
+DAILY_GROWTH_BASELINE = _cfg_float("DAILY_GROWTH_BASELINE", "daily_growth_baseline", 0.001)
+MARKET_CORRECTION_MIN = _cfg_float("MARKET_CORRECTION_MIN", "market_correction_min", 0.05)
+MARKET_CORRECTION_MAX = _cfg_float("MARKET_CORRECTION_MAX", "market_correction_max", 0.15)
+VOLATILITY_BASELINE_PORTFOLIO = _cfg_float("VOLATILITY_BASELINE_PORTFOLIO", "volatility_baseline_portfolio", 0.15)
+VOLATILITY_BASELINE_1Y = _cfg_float("VOLATILITY_BASELINE_1Y", "volatility_baseline_1y", 0.15)
+VOLATILITY_BASELINE_3Y = _cfg_float("VOLATILITY_BASELINE_3Y", "volatility_baseline_3y", 0.20)
+VOLATILITY_BASELINE_5Y = _cfg_float("VOLATILITY_BASELINE_5Y", "volatility_baseline_5y", 0.25)
+STD_DEV_MONTHLY = _cfg_float("STD_DEV_MONTHLY", "std_dev_monthly", 0.03)
+DRAWDOWN_DATA_POINTS = _cfg_int("DRAWDOWN_DATA_POINTS", "drawdown_data_points", 200)
+PERFORMANCE_DATA_POINTS = _cfg_int("PERFORMANCE_DATA_POINTS", "performance_data_points", 48)
+ROLLING_1Y_PERIODS = _cfg_int("ROLLING_1Y_PERIODS", "rolling_1y_periods", 12)
+ROLLING_3Y_PERIODS = _cfg_int("ROLLING_3Y_PERIODS", "rolling_3y_periods", 20)
+ROLLING_5Y_PERIODS = _cfg_int("ROLLING_5Y_PERIODS", "rolling_5y_periods", 10)
+VOLATILITY_PERIODS = _cfg_int("VOLATILITY_PERIODS", "volatility_periods", 24)
+SHARPE_PERIODS = _cfg_int("SHARPE_PERIODS", "sharpe_periods", 16)
+CONTRIBUTION_PERIODS = _cfg_int("CONTRIBUTION_PERIODS", "contribution_periods", 60)
+DIVIDEND_PERIODS = _cfg_int("DIVIDEND_PERIODS", "dividend_periods", 60)
+AREA_CHART_DAYS = _cfg_int("AREA_CHART_DAYS", "area_chart_days", 30)
+AREA_CHART_TOP_N = _cfg_int("AREA_CHART_TOP_N", "area_chart_top_n", 5)
+EXCELLENT_SHARPE_RATIO = _cfg_float("EXCELLENT_SHARPE_RATIO", "excellent_sharpe_ratio", 1.2)
+GOOD_SHARPE_RATIO = _cfg_float("GOOD_SHARPE_RATIO", "good_sharpe_ratio", 0.8)
+EXCELLENT_RETURN_THRESHOLD = _cfg_float("EXCELLENT_RETURN_THRESHOLD", "excellent_return_threshold", 50.0)
+GOOD_RETURN_THRESHOLD = _cfg_float("GOOD_RETURN_THRESHOLD", "good_return_threshold", 20.0)
+GOOD_VOLATILITY_THRESHOLD = _cfg_float("GOOD_VOLATILITY_THRESHOLD", "good_volatility_threshold", 0.15)
+
 
 from contextlib import asynccontextmanager
 
@@ -531,19 +573,17 @@ async def import_investment_data(
 
         # Clean up the temporary file
         try:
-            import os
             os.remove(temp_file_name)
-        except:
-            pass  # Ignore cleanup errors
+        except OSError:
+            pass  # Ignore cleanup errors — file may have already been removed
 
         return {"message": message, "data_type": data_type, "investment_name": investment_name if data_type != 'inflation' else None}
 
     except Exception as e:
         # Clean up temporary file on error
         try:
-            import os
-            os.remove(f"temp_{data_type}.csv")
-        except:
+            os.remove(temp_file_name)
+        except OSError:
             pass
         raise HTTPException(status_code=500, detail=str(e))
 
