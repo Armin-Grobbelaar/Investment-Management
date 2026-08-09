@@ -92,7 +92,7 @@ export default function NetWorthTracker() {
     const chartRef = useRef<ChartJS<"line"> | null>(null);
 
     const menuItems = [
-        { heading: "Navigation", items: ["Dashboard", "Net Worth", "IRR Analysis", "Metrics", "Predictions", "Edit Data"], urls: ["/Investments", "/NetWorth", "/IRRAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions", "/EditInvestmentData"] }
+        { heading: "Navigation", items: ["Dashboard", "Net Worth", "IRR Analysis", "Property Analysis", "Metrics", "Predictions", "Edit Data"], urls: ["/Investments", "/NetWorth", "/IRRAnalysis", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions", "/EditInvestmentData"] }
     ];
 
     useEffect(() => {

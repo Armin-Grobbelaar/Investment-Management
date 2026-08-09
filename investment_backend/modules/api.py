@@ -611,10 +611,13 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
             database_name=database_name
         )
         
-        # Ensure unit_price_date is datetime to avoid comparison errors with float (NaN)
-        if not timeseries_df.empty and "unit_price_date" in timeseries_df.columns:
-            timeseries_df["unit_price_date"] = pd.to_datetime(timeseries_df["unit_price_date"], errors='coerce')
-            timeseries_df = timeseries_df.dropna(subset=["unit_price_date"])
+        # Ensure unit_price_date is datetime and investment_value is numeric float to avoid type comparison errors
+        if not timeseries_df.empty:
+            if "unit_price_date" in timeseries_df.columns:
+                timeseries_df["unit_price_date"] = pd.to_datetime(timeseries_df["unit_price_date"], errors='coerce')
+                timeseries_df = timeseries_df.dropna(subset=["unit_price_date"])
+            if "investment_value" in timeseries_df.columns:
+                timeseries_df["investment_value"] = pd.to_numeric(timeseries_df["investment_value"], errors='coerce').fillna(0.0)
 
         # Apply filtering if filter parameters are provided
         if filter_type and filter_value:
@@ -661,8 +664,14 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
                     "borderColour": _get_blue_color(investment_index)
                 })
 
-            min_date = timeseries_df["unit_price_date"].min()
+            # Trim date range to the first non-zero investment value date
+            nonzero_df = timeseries_df[timeseries_df["investment_value"] > 0.01]
+            if not nonzero_df.empty:
+                min_date = nonzero_df["unit_price_date"].min()
+            else:
+                min_date = timeseries_df["unit_price_date"].min()
             max_date = timeseries_df["unit_price_date"].max()
+
             timeseries_date_range = {
                 "min": min_date.isoformat() if hasattr(min_date, 'isoformat') else str(min_date),
                 "max": max_date.isoformat() if hasattr(max_date, 'isoformat') else str(max_date)

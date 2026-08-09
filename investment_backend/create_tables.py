@@ -482,10 +482,37 @@ def reset_database_with_new_schema():
     create_tables(INVESTMENTS_DB)
     create_tables(USERS_DB)
 
-    # Step 3: Populate with test data (needs to be updated for new schema)
-    print("\n📊 Populating with test data...")
-    from populate_test_data import main as populate_test_data
-    populate_test_data()
+    # Step 3: Populate default users
+    print("\n👤 Populating default users...")
+    try:
+        user_conn = psycopg2.connect(
+            host=POSTGRES_HOST, port=POSTGRES_PORT,
+            user=POSTGRES_USER, password=POSTGRES_PASSWORD,
+            database=USERS_DB
+        )
+        u_cursor = user_conn.cursor()
+        u_cursor.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            ('armin', 'armin@example.com', 'pbkdf2:sha256:test_hash_armin')
+        )
+        u_cursor.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            ('demo', 'demo@example.com', 'pbkdf2:sha256:test_hash_demo')
+        )
+        user_conn.commit()
+        u_cursor.close()
+        user_conn.close()
+        print("✅ Default users inserted into Users database")
+    except Exception as e:
+        print(f"⚠️ Could not insert default users: {e}")
+
+    # Step 4: Populate with investment test data from Excel/seeder
+    print("\n📊 Populating investments with test data...")
+    try:
+        from import_npv_excel import main as import_main
+        import_main()
+    except Exception as e:
+        print(f"⚠️ Error running import_npv_excel: {e}")
 
     print("=" * 60)
     print("✅ Database reset with new schema completed!")
