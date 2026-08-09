@@ -821,6 +821,11 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
         )
 
         # Get investment data for line chart timeseries (include in single response)
+        timeseries_df = get_investment_data(
+            base_currency=base_currency,
+            database_name=database_name
+        )
+
         # Ensure unit_price_date is datetime and investment_value is numeric float to avoid type comparison errors
         if not timeseries_df.empty:
             if "unit_price_date" in timeseries_df.columns:
