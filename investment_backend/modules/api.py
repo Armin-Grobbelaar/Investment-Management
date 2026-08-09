@@ -85,7 +85,7 @@ class AddInvestmentRequest(BaseModel):
     investment_fee: float
     investment_status: str
 
-def get_dashboard_data(database_name: str, base_currency: str = "ZAR"):
+def get_dashboard_data(database_name: str, base_currency: str = "R"):
     """
     Get optimized dashboard data with caching.
     """
@@ -157,7 +157,7 @@ def get_dashboard_data(database_name: str, base_currency: str = "ZAR"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard data: {str(e)}")
 
-def get_investment_timeseries_data(database_name: str, base_currency: str = "ZAR", investment_name: str = None):
+def get_investment_timeseries_data(database_name: str, base_currency: str = "R", investment_name: str = None):
     """
     Get optimized time series data for charts with caching.
     """
@@ -472,7 +472,7 @@ def health_check_api():
         "uptime_seconds": (datetime.now() - datetime.strptime("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")).total_seconds()
     }
 
-def get_investment_metrics_api(database_name: str, base_currency: str = "ZAR", filter: str = "portfolio"):
+def get_investment_metrics_api(database_name: str, base_currency: str = "R", filter: str = "portfolio"):
     """
     Return real investment metrics from the database.
     """
@@ -577,7 +577,7 @@ def _get_blue_color_for_area_chart(index: int) -> str:
     return AREA_CHART_COLORS[index % len(AREA_CHART_COLORS)]
 
 
-def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
+def get_dashboard_charts_api(database_name: str, base_currency: str = "R",
                              filter_type: str = None, filter_value: str = None):
     """
     Get pre-processed chart data for frontend - all aggregations done server-side.

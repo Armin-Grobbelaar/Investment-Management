@@ -253,7 +253,7 @@ def create_tables(db_name):
         VALUES
             ('native_currency', 'R', 'Default native currency for the application (symbol)', 'currency', true),
             ('pdf_report_frequency', 'monthly', 'How often PDF reports should be generated (daily, weekly, monthly, quarterly, annually)', 'reporting', true),
-            ('base_currency', 'ZAR', 'Base currency for portfolio calculations and display', 'currency', true),
+            ('base_currency', 'R', 'Base currency for portfolio calculations and display', 'currency', true),
             ('risk_tolerance', 'medium', 'Default risk tolerance level for recommendations (low, medium, high)', 'risk', true),
             ('email_notifications', 'true', 'Whether to send email notifications for reports', 'communication', true),
             ('auto_update_prices', 'true', 'Whether to automatically update investment prices from external sources', 'automation', true),
