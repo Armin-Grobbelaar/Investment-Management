@@ -470,16 +470,6 @@ function EditData() {
 
   const hasInvestmentIdCol = columns.some(c => c.name.toLowerCase() === 'investment_id');
 
-  const menuItems = [
-    {
-      "heading": "Tools & Analysis",
-      "items": ["Dashboard", "Edit Data", "Factsheets", "Property Analysis", "View Metrics", "Monte Carlo"],
-      "urls": ["/Investments", "/EditInvestmentData", "/Factsheets", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions"]
-    }
-  ];
-
-  // ── Render ───────────────────────────────────────────────────────────────
-
   return (
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
       <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh' }}>
@@ -493,7 +483,8 @@ function EditData() {
           px: 3, py: 1.5,
           display: 'flex', alignItems: 'center', gap: 2
         }}>
-          <DrawerComponent menuItems={menuItems} />
+            <DrawerComponent menuItems={[]} />
+
           <IconButton onClick={() => router.push('/Investments')} size="small">
             <KeyboardBackspaceIcon />
           </IconButton>

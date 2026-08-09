@@ -1,6 +1,6 @@
 import numpy as np
 import datetime
-from .database import get_db_connection
+from .database import get_db_connection, get_config_value
 from .metrics import get_investment_metrics_data
 from .portfolio_metrics_api import get_portfolio_metrics_data_api
 
@@ -61,6 +61,15 @@ def run_gbm_monte_carlo(
         }
     }
 
+def _cfg_float(table_key: str, default: float) -> float:
+    val = get_config_value(table_key)
+    if val is not None:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
 def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension_value: str, years: int = 10, num_simulations: int = 1000):
     """
     Run Monte Carlo for a portfolio dimension (e.g., 'portfolio', 'account_type:Retirement Annuity', etc.)
@@ -71,7 +80,14 @@ def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension
     
     if not data or data.get("data_points", 1) == 0 or not data.get("portfolio_performance_return"):
         # Fallback values if no history
-        return run_gbm_monte_carlo(100000, 5000, 0.10, 0.15, years, num_simulations)
+        return run_gbm_monte_carlo(
+            _cfg_float("monte_carlo_fallback_value", 100000), 
+            _cfg_float("monte_carlo_fallback_contribution", 5000), 
+            _cfg_float("monte_carlo_fallback_mu", 0.10), 
+            0.15, 
+            years, 
+            num_simulations
+        )
     
     # 2. Extract total current value from key_metrics list
     current_value = 0
@@ -86,7 +102,7 @@ def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension
             break
     
     if current_value <= 0:
-        current_value = 100000  # sensible fallback
+        current_value = _cfg_float("monte_carlo_fallback_value", 100000)
         
     # 3. Infer monthly contribution (average over last 6 months)
     recent_contribs = data.get("contribution_vs_growth", [])[-6:]
@@ -102,7 +118,7 @@ def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension
         cagr_val = float(data.get("cagr_trend", [])[-1]["value"])
         mu = cagr_val / 100.0
     except Exception:
-        mu = 0.10
+        mu = _cfg_float("monte_carlo_fallback_mu", 0.10)
         
     # 5. Infer sigma (annualised volatility) from monthly return variance
     try:

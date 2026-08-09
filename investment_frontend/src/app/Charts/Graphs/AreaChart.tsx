@@ -21,9 +21,11 @@ interface Props {
   data: AreaChartData;
   title: string;
   theme?: 'light' | 'dark';
+  currencySymbol?: string;
+  currencyCode?: string;
 }
 
-const AreaChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
+const AreaChart: React.FC<Props> = ({ data, title, theme = 'light', currencySymbol = 'R', currencyCode = 'ZAR' }) => {
   const isDark = theme === 'dark';
   const textColor = isDark ? '#e0e0e0' : '#2c3e50';
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
@@ -53,7 +55,7 @@ const AreaChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
           label: (context: any) => {
             const label = context.dataset.label || '';
             const value = context.parsed.y;
-            return `${label}: R${Number(value).toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`;
+            return `${label}: ${new Intl.NumberFormat('en-ZA', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(value)}`;
           },
         },
       },
@@ -80,13 +82,13 @@ const AreaChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
         display: true,
         title: {
           display: true,
-          text: 'Portfolio Value (R)',
+          text: `Portfolio Value (${currencySymbol})`,
           color: textColor,
         },
         ticks: {
           color: textColor,
           font: { size: 10 },
-          callback: (value: any) => `R${Number(value).toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`,
+          callback: (value: any) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(value),
         },
         grid: {
           color: gridColor,

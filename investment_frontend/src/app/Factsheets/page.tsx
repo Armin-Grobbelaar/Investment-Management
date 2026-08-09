@@ -144,22 +144,13 @@ export default function FactsheetsPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Mock menu items since we don't fetch dashboard data here
-  const menuItems = [
-    {
-      "heading": "Tools & Analysis",
-      "items": ["Dashboard", "Edit Data", "Factsheets", "Property Analysis", "View Metrics", "Monte Carlo"],
-      "urls": ["/Investments", "/EditInvestmentData", "/Factsheets", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions"]
-    }
-  ];
-
   return (
     <ThemeProvider theme={theme}>
       <Box sx={{ backgroundColor: 'background.default', minHeight: '100vh', pt: 2, pb: 6 }}>
         {/* Navigation & Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', px: 3, mb: 4, alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <DrawerComponent menuItems={menuItems} />
+            <DrawerComponent />
             <IconButton onClick={() => router.back()} color="inherit" size="large">
               <KeyboardBackspaceIcon />
             </IconButton>

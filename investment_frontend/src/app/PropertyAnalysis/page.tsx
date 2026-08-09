@@ -155,7 +155,7 @@ export default function PropertyAnalysis() {
         setDownloadingPdf(false);
     };
 
-    const formatCurr = (v: number) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(v || 0);
+    const formatCurr = (v: number) => `R ${new Intl.NumberFormat('en-ZA').format(v || 0)}`;
     const formatPct = (v: number) => `${(v || 0).toFixed(2)}%`;
 
     return (
@@ -163,7 +163,7 @@ export default function PropertyAnalysis() {
             <Box sx={{ backgroundColor: 'background.default', minHeight: '100vh', pb: 6, pt: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', px: 3, mb: 4, alignItems: 'center' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <DrawerComponent menuItems={[{ heading: "Tools & Analysis", items: ["Edit Data", "Factsheets", "Property Analysis", "View Metrics", "Monte Carlo Simulations"], urls: ["/EditInvestmentData", "/Factsheets", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions"] }]} />
+                        <DrawerComponent />
                         <IconButton onClick={() => router.back()} color="inherit" size="large">
                             <KeyboardBackspaceIcon />
                         </IconButton>
