@@ -54,7 +54,7 @@ DEFAULT_DB = os.getenv("INVESTMENTS_DB", "Investments")
 # so they can be updated via the settings UI without a code redeploy.
 # The format is: os.environ.get(ENV_KEY) or get_config_value(TABLE_KEY, fallback)
 CACHE_TIMEOUT_SECONDS = int(os.environ.get("CACHE_TIMEOUT_SECONDS", "300"))
-DEFAULT_BASE_CURRENCY = os.environ.get("DEFAULT_BASE_CURRENCY", "ZAR")
+DEFAULT_BASE_CURRENCY = os.environ.get("DEFAULT_BASE_CURRENCY", "R")
 
 # --- Simulation / Risk model constants (sourced from DB configuration table) ---
 def _cfg_float(env_key: str, table_key: str, default: float) -> float:
@@ -253,7 +253,7 @@ investment_api.add_middleware(
 )
 
 @investment_api.get("/dashboard_data/{database_name}")
-async def fastapi_get_dashboard_data(database_name: str, base_currency: str = "ZAR"):
+async def fastapi_get_dashboard_data(database_name: str, base_currency: str = "R"):
     """
     Optimized endpoint that provides all dashboard data in a single response.
     Includes caching and pre-computed aggregations for maximum performance.
@@ -327,7 +327,7 @@ async def fastapi_get_dashboard_data(database_name: str, base_currency: str = "Z
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard data: {str(e)}")
 
 @investment_api.get("/investment_timeseries/{database_name}")
-async def fastapi_get_investment_timeseries(database_name: str, base_currency: str = "ZAR",
+async def fastapi_get_investment_timeseries(database_name: str, base_currency: str = "R",
                                            investment_name: str = None):
     """
     Get optimized time series data for charts with caching.
@@ -786,7 +786,7 @@ async def refresh_data(database_name: str, background_tasks: BackgroundTasks):
     }
 
 @investment_api.get("/dashboard_charts/{database_name}")
-async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
+async def get_dashboard_charts(database_name: str, base_currency: str = "R",
                               filter_type: str = None, filter_value: str = None):
     """
     Get pre-processed chart data for frontend - all aggregations done server-side.
@@ -1601,7 +1601,7 @@ async def maintenance_recalculate_metrics(database_name: str = "Investments"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @investment_api.get("/irr/Investments")
-async def get_irr(database_name: str = "Investments", base_currency: str = "ZAR"):
+async def get_irr(database_name: str = "Investments", base_currency: str = "R"):
     """Get IRR analysis across all dimensions."""
     try:
         from modules.metrics import calculate_portfolio_irr
@@ -1687,7 +1687,7 @@ async def bulk_import_template(import_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @investment_api.get("/net_worth/Investments")
-async def get_net_worth(database_name: str = "Investments", base_currency: str = "ZAR"):
+async def get_net_worth(database_name: str = "Investments", base_currency: str = "R"):
     """Get net worth breakdown."""
     try:
         summary_df = get_investment_summary_display(base_currency=base_currency, database_name=database_name)
@@ -1830,7 +1830,7 @@ async def get_investment_comparison(database_name: str):
 
 
 @investment_api.get("/investment_metrics/{database_name}")
-async def get_investment_metrics(database_name: str, base_currency: str = "ZAR", filter: str = "portfolio"):
+async def get_investment_metrics(database_name: str, base_currency: str = "R", filter: str = "portfolio"):
     """
     Get comprehensive investment metrics over time from stored portfolio_metrics table.
     """
@@ -1841,7 +1841,7 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
             #   - "portfolio"                    → portfolio / All
             #   - "by_type:ETF"                  → investment_type / ETF
             #   - "by_institution:Standard Bank" → institution / Standard Bank
-            #   - "by_currency:ZAR"              → currency / ZAR
+            #   - "by_currency:R"              → currency / R
             #   - "individual:Investment Name"   → investment / <name>
             dimension_map = {
                 "portfolio": "portfolio",

@@ -114,7 +114,7 @@ export default function IRRAnalysis() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get(`/api/irr/${DB_NAME}?base_currency=ZAR`);
+                const res = await axios.get(`/api/irr/${DB_NAME}?base_currency=R`);
                 setData(res.data);
                 if (res.data.error) setError(res.data.error);
             } catch (err: any) {
@@ -224,7 +224,7 @@ export default function IRRAnalysis() {
                         </Typography>
                     </Box>
                     <Box sx={{ flex: 1 }} />
-                    <Chip label="ZAR" size="small" sx={{ mr: 1, color: textSecondary }} />
+                    <Chip label="R" size="small" sx={{ mr: 1, color: textSecondary }} />
                     <IconButton onClick={() => setDarkMode(d => !d)} sx={{ color: textSecondary }}>
                         {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
                     </IconButton>

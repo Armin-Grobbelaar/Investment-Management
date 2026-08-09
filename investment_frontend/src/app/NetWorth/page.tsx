@@ -98,7 +98,7 @@ export default function NetWorthTracker() {
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=ZAR`);
+                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=R`);
                 setData(res.data);
             } catch (err: any) {
                 setError(err.message || "Failed to load net worth data");
@@ -198,7 +198,7 @@ export default function NetWorthTracker() {
             return name.length > 20 ? name.slice(0, 18) + "…" : name;
         }),
         datasets: [{
-            label: "Value (ZAR)",
+            label: "Value (R)",
             data: activeItems.map(it => it.value),
             backgroundColor: PALETTE.slice(0, activeItems.length).map(c => c + "CC"),
             borderColor: PALETTE.slice(0, activeItems.length),
