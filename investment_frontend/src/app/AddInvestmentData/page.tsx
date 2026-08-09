@@ -151,7 +151,7 @@ const AddInvestmentData = () => {
 
   return (
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
-      <div style={{ backgroundColor: darkMode ? '#222' : '#f1f2f4', minHeight: '100vh', transition: 'background-color 0.3s' }}>
+      <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh', transition: 'background-color 0.3s' }}>
         <IconButton
           onClick={toggleDarkMode}
           color="inherit"

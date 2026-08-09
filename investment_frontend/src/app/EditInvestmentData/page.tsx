@@ -482,11 +482,11 @@ function EditData() {
 
   return (
     <ThemeProvider theme={darkMode ? brandingDarkTheme : brandingLightTheme}>
-      <div style={{ backgroundColor: darkMode ? '#1a1a2e' : '#f0f2f5', minHeight: '100vh' }}>
+      <div style={{ backgroundColor: darkMode ? '#001E3C' : '#fff', minHeight: '100vh' }}>
         {/* Header bar */}
         <Box sx={{
           position: 'sticky', top: 0, zIndex: 1200,
-          background: darkMode ? 'rgba(26,26,46,0.97)' : 'rgba(255,255,255,0.97)',
+          background: darkMode ? 'rgba(0,30,60,0.97)' : 'rgba(255,255,255,0.97)',
           backdropFilter: 'blur(8px)',
           borderBottom: '1px solid',
           borderColor: 'divider',

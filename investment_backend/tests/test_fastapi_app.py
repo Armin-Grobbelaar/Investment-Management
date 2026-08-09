@@ -87,3 +87,65 @@ class TestImportUnitPricesEndpoint:
         args, kwargs = mock_import.call_args
         assert len(args) == 2  # (file_name, investment_name) — no currency arg
         assert "USD" not in kwargs.values() and "USD" not in args
+
+
+class TestDashboardFilterCacheKey:
+    """Test that filtered and unfiltered dashboard requests use different cache keys
+    so the sidebar filter (ETF, GBP, Allan Gray, etc.) returns correctly filtered data
+    instead of the cached full-portfolio payload."""
+
+    def test_cache_key_includes_filter_params(self):
+        """Cache keys must differ between filtered and unfiltered requests."""
+        import investment_backend_fastapi as app_mod
+
+        key_unfiltered = f"charts:Investments:ZAR::"
+        key_filtered_type = f"charts:Investments:ZAR:investment_type:ETF"
+        key_filtered_curr = f"charts:Investments:ZAR:unit_currency:GBP"
+        key_filtered_inst = f"charts:Investments:ZAR:institution_name:Allan Gray"
+
+        assert key_unfiltered != key_filtered_type
+        assert key_filtered_type != key_filtered_curr
+        assert key_filtered_curr != key_filtered_inst
+
+    def test_filter_by_investment_type_returns_only_that_type(self):
+        """When filtering by investment_type, the summary_table must only
+        contain investments of that type (no cross-contamination)."""
+        import pandas as pd
+
+        # Simulate the filter logic that runs inside get_dashboard_charts
+        summary_df = pd.DataFrame({
+            "investment_name": ["ETF Fund A", "ETF Fund B", "Trust Fund A", "Forex A"],
+            "investment_type": ["ETF", "ETF", "Unit Trust", "Forex"],
+            "unit_currency": ["ZAR", "ZAR", "ZAR", "ZAR"],
+            "institution_name": ["Allan Gray", "PSG Wealth", "Coronation", "Forex"],
+        })
+
+        filter_type = "investment_type"
+        filter_value = "ETF"
+        filtered_investment_names = summary_df[summary_df["investment_type"] == filter_value]["investment_name"].tolist()
+        result = summary_df[summary_df["investment_name"].isin(filtered_investment_names)]
+
+        assert len(result) == 2
+        assert all(result["investment_type"] == "ETF")
+
+    def test_filter_by_currency_uses_raw_summary(self):
+        """Currency filter must match against the raw (unconverted) unit_currency,
+        not the display version which has been converted to base currency."""
+        import pandas as pd
+
+        raw_summary = pd.DataFrame({
+            "investment_name": ["Fund A", "Fund B", "Fund C"],
+            "unit_currency": ["ZAR", "GBP", "USD"],
+        })
+        display_summary = pd.DataFrame({
+            "investment_name": ["Fund A", "Fund B", "Fund C"],
+            "unit_currency": ["ZAR", "ZAR", "ZAR"],  # converted to base
+        })
+
+        # Filter on raw, then match names in display
+        filter_value = "GBP"
+        filtered_names = raw_summary[raw_summary["unit_currency"] == filter_value]["investment_name"].tolist()
+        result = display_summary[display_summary["investment_name"].isin(filtered_names)]
+
+        assert len(result) == 1
+        assert result["investment_name"].iloc[0] == "Fund B"

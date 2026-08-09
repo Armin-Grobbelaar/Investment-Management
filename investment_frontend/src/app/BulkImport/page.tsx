@@ -142,10 +142,10 @@ export default function BulkImport() {
     ];
 
     const theme = darkMode ? brandingDarkTheme : brandingLightTheme;
-    const bg = darkMode ? "#0d1117" : "#f0f2f5";
-    const cardBg = darkMode ? "#161b22" : "#ffffff";
-    const textPrimary = darkMode ? "#e6edf3" : "#0d1117";
-    const textSecondary = darkMode ? "#8b949e" : "#57606a";
+    const bg = darkMode ? "#001E3C" : "#fff";
+    const cardBg = darkMode ? "#0A1929" : "#ffffff";
+    const textPrimary = darkMode ? "#ffffff" : "#1A2027";
+    const textSecondary = darkMode ? "#B2BAC2" : "#6F7E8C";
     const borderColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
 
     const cfg = TYPE_CONFIG[importType];
@@ -409,7 +409,7 @@ export default function BulkImport() {
                         {/* ── Price Fetch Control ── */}
                         <Grid size={{ xs: 12 }}>
                             <Card elevation={0} sx={{
-                                background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+                                background: "linear-gradient(135deg, #001E3C 0%, #173A5E 50%, #0059B2 100%)",
                                 borderRadius: 3
                             }}>
                                 <CardContent sx={{ p: 3 }}>
