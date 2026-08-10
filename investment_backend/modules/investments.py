@@ -382,83 +382,111 @@ def get_investment_names_list(database_name: str = DEFAULT_DB) -> list:
 def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
                              base_currency: str = "ZAR") -> list[dict]:
     """
-    Build a net-worth time series consistent with actual transaction history.
+    Build a net-worth time series using ACTUAL historical holdings.
 
     For each investment on each price date, the value is:
-        cumulative_units_up_to_date * unit_price(on that date)
-    where cumulative_units_up_to_date is the running total of units bought
-    (from the transactions table) on or before that date.
+        cumulative_units_purchased_up_to_date * unit_price(on that date)
+    where cumulative_units is computed from the transactions table — NOT the
+    current number_of_units_held, which would create a misleadingly monotone
+    graph (today's holdings valued at historical prices).
 
-    This accurately reflects what the portfolio was actually worth at each
-    point in time, including the effect of contributions over time.
-    The last point equals the displayed total net worth.
+    This accurately reflects what the portfolio was worth at each point in time.
+    The last point equals the displayed current total net worth.
 
     Returns a list of {"date": "YYYY-MM-DD", "value": float} sorted ascending.
     """
     from .currency import CURRENCY_SYMBOLS
 
     with get_db_connection(database_name) as (conn, cursor):
-        # Get all non-Forex investments with unit prices.
-        # Use the current number_of_units_held from the investments table
-        # (the authoritative snapshot) valued at each historical price.
-        # This shows what today's portfolio would have been worth at each
-        # historical price point, ensuring the last point equals the
-        # displayed total net worth.
+        # Load all buy/sell transactions to reconstruct unit counts over time
         cursor.execute("""
-            SELECT i.id, i.unit_currency, i.number_of_units_held,
-                   up.unit_price_date, up.unit_price
-            FROM investments i
-            JOIN v_investment_prices up ON up.investment_id = i.id
-            WHERE i.number_of_units_held > 0 AND i.investment_type <> 'Forex'
-              AND up.unit_price > 0
-            ORDER BY up.unit_price_date
+            SELECT t.investment_id, t.transaction_date, t.transaction_type, t.number_of_units
+            FROM transactions t
+            JOIN investments i ON t.investment_id = i.id
+            WHERE i.investment_type <> 'Forex'
+              AND i.number_of_units_held > 0
+            ORDER BY t.investment_id, t.transaction_date
         """)
-        rows = cursor.fetchall()
+        txn_rows = cursor.fetchall()
 
-        # Also get investments WITHOUT price history but with transactions,
-        # so they still contribute to the total net worth.
+        import bisect
+        # Build (date, cumulative_units) timeline per investment_id
+        inv_txns: dict[int, list] = {}
+        for inv_id, tdate, ttype, units in txn_rows:
+            if inv_id not in inv_txns:
+                inv_txns[inv_id] = []
+            ttype_lower = (ttype or "").lower()
+            if ttype_lower in ('buy', 'switch_in'):
+                net = float(units or 0)
+            elif ttype_lower in ('sell', 'switch_out'):
+                net = -abs(float(units or 0))
+            else:
+                net = 0.0
+            inv_txns[inv_id].append((tdate, net))
+
+        # Build cumulative timeline per investment
+        inv_cum_units: dict[int, list] = {}  # {inv_id: [(date, cumulative_units), ...]}
+        for inv_id, events in inv_txns.items():
+            events.sort(key=lambda x: x[0])
+            timeline = []
+            cum = 0.0
+            for d, u in events:
+                cum += u
+                timeline.append((d, cum))
+            inv_cum_units[inv_id] = timeline
+
+        def _get_units_on_date(inv_id: int, target_date) -> float:
+            """Return the cumulative units held for inv_id on target_date."""
+            timeline = inv_cum_units.get(inv_id)
+            if not timeline:
+                return 0.0
+            idx = bisect.bisect_right(timeline, (target_date, float('inf'))) - 1
+            if idx < 0:
+                return 0.0
+            return max(0.0, timeline[idx][1])
+
+        # Fetch price history via the shared price view (handles price_source_investment_id)
+        cursor.execute("""
+            SELECT v.investment_id, i.unit_currency, v.unit_price_date, v.unit_price
+            FROM v_investment_prices v
+            JOIN investments i ON v.investment_id = i.id
+            WHERE i.number_of_units_held > 0
+              AND i.investment_type <> 'Forex'
+              AND v.unit_price > 0
+            ORDER BY v.unit_price_date
+        """)
+        price_rows = cursor.fetchall()
+
+        # Fallback: investments with no price history — use initial date + current value
         cursor.execute("""
             WITH priced_invs AS (
                 SELECT DISTINCT investment_id FROM v_investment_prices WHERE unit_price > 0
             )
-            SELECT
-                i.id,
-                i.unit_currency,
-                i.initial_investment_date,
-                i.unit_price,
-                i.number_of_units_held
+            SELECT i.id, i.unit_currency, i.initial_investment_date, i.unit_price, i.number_of_units_held
             FROM investments i
             LEFT JOIN priced_invs p ON p.investment_id = i.id
             WHERE i.number_of_units_held > 0
               AND i.investment_type <> 'Forex'
               AND p.investment_id IS NULL
-            ORDER BY i.id
         """)
         unpriced = cursor.fetchall()
 
-        if not rows and not unpriced:
-            return []
-
-        # Load every forex investment + its full price history once.
-        # Build a sorted (date, rate) list per currency pair.
-        import bisect
+        # Load forex rates for currency conversion
         forex_series: dict[tuple, list] = {}
         cursor.execute("""
-            SELECT i.id, i.investment_ticker, up.unit_price_date, up.unit_price
+            SELECT i.investment_ticker, up.unit_price_date, up.unit_price
             FROM investments i
             JOIN v_investment_prices up ON up.investment_id = i.id
             WHERE i.investment_type = 'Forex'
             ORDER BY up.unit_price_date
         """)
-        for fid, ticker, fdate, fprice in cursor.fetchall():
+        for ticker, fdate, fprice in cursor.fetchall():
             ticker = (ticker or "").upper().replace("=X", "")
-            if len(ticker) == 6:  # e.g. USDZAR
+            if len(ticker) == 6:
                 from_c, to_c = ticker[:3], ticker[3:]
                 forex_series.setdefault((from_c, to_c), []).append((fdate, float(fprice)))
-        conn.rollback()  # release the read snapshot
 
     def _lookup_rate(pair: tuple, date_obj) -> float | None:
-        """Rate on or before date_obj via binary search (within a 90-day window)."""
         series = forex_series.get(pair)
         if not series:
             return None
@@ -471,33 +499,37 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
         return None
 
     def _rate(from_c: str, date_obj) -> float:
-        """Rate from `from_c` to base_currency on (or before) date_obj."""
         if from_c == base_currency:
             return 1.0
-        # Direct pair
         direct = _lookup_rate((from_c, base_currency), date_obj)
         if direct is not None:
             return direct
-        # Reverse pair
         rev = _lookup_rate((base_currency, from_c), date_obj)
         if rev is not None and rev != 0:
             return 1.0 / rev
         return 1.0
 
-    # Build daily totals using current holdings valued at historical prices
-    daily_totals: dict[date, float] = {}
+    # Build monthly totals using HISTORICAL unit counts × historical prices
+    # We aggregate to monthly resolution to keep chart performance acceptable
+    from collections import defaultdict
+    daily_totals: dict = defaultdict(float)
 
-    for inv_id, currency, units, price_date, price in rows:
+    for inv_id, currency, price_date, price in price_rows:
         currency_code = currency
         if isinstance(currency_code, str) and len(currency_code) == 1:
             currency_code = CURRENCY_SYMBOLS.get(currency_code, currency_code)
-        value_local = float(units) * float(price)
+
+        # Use the historically-correct unit count for this date
+        units = _get_units_on_date(inv_id, price_date)
+        if units <= 0:
+            continue  # Investment hadn't been purchased yet on this date
+
+        value_local = units * float(price)
         if currency_code != base_currency:
             value_local *= _rate(currency_code, price_date)
-        daily_totals[price_date] = daily_totals.get(price_date, 0.0) + value_local
+        daily_totals[price_date] += value_local
 
-    # Add investments without price history: they use their current value
-    # (number_of_units_held × unit_price) for all dates from their initial date.
+    # Fallback for investments with no price history
     for inv_id, currency, init_date, price, units_held in unpriced:
         currency_code = currency
         if isinstance(currency_code, str) and len(currency_code) == 1:
@@ -507,14 +539,12 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
         value_local = float(units_held) * float(price)
         if currency_code != base_currency:
             value_local *= _rate(currency_code, init_date)
-        # Add this value to all dates >= init_date
         init_dt = init_date if isinstance(init_date, date) else init_date.date()
         for d in list(daily_totals.keys()):
             if d >= init_dt:
-                daily_totals[d] = daily_totals.get(d, 0.0) + value_local
-        # If no dates exist yet, create an initial entry
-        if init_dt not in daily_totals and not any(d >= init_dt for d in daily_totals.keys()):
-            daily_totals[init_dt] = daily_totals.get(init_dt, 0.0) + value_local
+                daily_totals[d] += value_local
+        if not any(d >= init_dt for d in daily_totals):
+            daily_totals[init_dt] += value_local
 
     return [
         {"date": d.isoformat(), "value": round(v, 2)}

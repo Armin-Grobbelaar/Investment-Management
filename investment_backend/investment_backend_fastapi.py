@@ -1893,21 +1893,21 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                 )
             
             portfolio_performance_return = []
-            rolling_returns_1y = []
-            rolling_returns_3y = []
-            rolling_returns_5y = []
-            risk_metrics = []
+            cagr_trend = []
+            irr_trend = []
             contribution_vs_growth = []
             dividend_yield = []
-            
+            fee_analysis = []
+            tax_analysis = []
+
             for idx, row in enumerate(rows):
                 date_str = row[0].strftime("%Y-%m") if row[0] else f"Period {idx}"
                 contrib = float(row[1] or 0)
                 current_val = float(row[2] or 0)
                 ret_amt = float(row[3] or 0)
                 ret_pct = float(row[4] or 0)
-                cagr = float(row[5] or 0)
-                irr = float(row[6] or 0)
+                cagr_val = float(row[5] or 0)
+                irr_val = float(row[6] or 0)
                 fees = float(row[7] or 0)
                 divs = float(row[8] or 0)
                 tax = float(row[9] or 0)
@@ -1915,86 +1915,135 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                 
                 portfolio_performance_return.append({
                     "period": date_str,
-                    "value": round(ret_pct * 100, 2),
+                    "value": round(ret_pct, 2),
                     "index": idx
                 })
                 
-                rolling_returns_1y.append({
+                cagr_trend.append({
                     "period": date_str,
-                    "value": round(ret_pct * 100, 2),
+                    "value": round(cagr_val * 100, 2),
                     "index": idx
                 })
-                rolling_returns_3y.append({
+
+                irr_trend.append({
                     "period": date_str,
-                    "value": round(cagr * 100, 2),
+                    "value": round(irr_val * 100, 2),
                     "index": idx
                 })
-                rolling_returns_5y.append({
-                    "period": date_str,
-                    "value": round(irr * 100, 2),
-                    "index": idx
-                })
-                
-                risk_metrics.append({
-                    "period": date_str,
-                    "value": round(abs(ret_pct) * VOLATILITY_BASELINE_PORTFOLIO, 3),
-                    "index": idx
-                })
-                
+
                 contribution_vs_growth.append({
                     "period": date_str,
-                    "contributions": contrib,
-                    "growth": current_val - contrib,
+                    "contributions": round(contrib, 2),
+                    "growth": round(ret_amt, 2),
+                    "value": round(current_val, 2),
                     "index": idx
                 })
-                
+
                 dividend_yield.append({
                     "period": date_str,
                     "value": round((divs / current_val * 100) if current_val > 0 else 0, 4),
                     "index": idx
                 })
-            
+
+                fee_analysis.append({
+                    "period": date_str,
+                    "fee_ratio": round((fees / current_val * 100) if current_val > 0 else 0, 4),
+                    "total_fees": round(fees, 2),
+                    "index": idx
+                })
+
+                tax_analysis.append({
+                    "period": date_str,
+                    "tax_ratio": round((tax / current_val * 100) if current_val > 0 else 0, 4),
+                    "total_tax": round(tax, 2),
+                    "index": idx
+                })
+
+            # Calculate periodic returns for rolling returns & risk metrics
+            rolling_returns_1y = []
+            rolling_returns_3y = []
+            rolling_returns_5y = []
+            risk_volatility = []
+            risk_sharpe = []
+
+            if len(rows) >= 2:
+                cv_vals = [float(r[2] or 0) for r in rows]
+                periodic_rets = []
+                for i in range(1, len(cv_vals)):
+                    if cv_vals[i-1] > 0:
+                        periodic_rets.append((cv_vals[i] - cv_vals[i-1]) / cv_vals[i-1])
+                    else:
+                        periodic_rets.append(0.0)
+                
+                periodic_ser = pd.Series(periodic_rets)
+                ann_factor = float(np.sqrt(12))
+
+                if len(periodic_ser) >= 11:
+                    for i in range(len(periodic_ser) - 10):
+                        window = periodic_ser.iloc[i:i+12]
+                        compound = float(np.prod(1 + window)) - 1
+                        period_lbl = rows[i+11][0].strftime("%Y-%m") if rows[i+11][0] else f"Period {i}"
+                        rolling_returns_1y.append({
+                            "period": period_lbl,
+                            "value": round(compound * 100, 2),
+                            "index": i
+                        })
+
+                        vol = float(window.std(ddof=1)) * ann_factor * 100
+                        risk_volatility.append({
+                            "period": period_lbl,
+                            "value": round(vol, 2) if not np.isnan(vol) else 0,
+                            "index": i
+                        })
+
+                        sharpe = (compound / (vol / 100)) if (not np.isnan(vol) and vol > 0) else 0
+                        risk_sharpe.append({
+                            "period": period_lbl,
+                            "value": round(sharpe, 4) if not np.isnan(sharpe) else 0,
+                            "index": i
+                        })
+
+                if len(periodic_ser) >= 35:
+                    for i in range(0, len(periodic_ser) - 34, 3):
+                        window = periodic_ser.iloc[i:i+36]
+                        compound = float(np.prod(1 + window)) - 1
+                        period_lbl = rows[i+35][0].strftime("%Y-%m") if rows[i+35][0] else f"Period {i}"
+                        rolling_returns_3y.append({
+                            "period": period_lbl,
+                            "value": round(compound * 100, 2),
+                            "index": len(rolling_returns_3y)
+                        })
+
+                if len(periodic_ser) >= 59:
+                    for i in range(0, len(periodic_ser) - 58, 6):
+                        window = periodic_ser.iloc[i:i+60]
+                        compound = float(np.prod(1 + window)) - 1
+                        period_lbl = rows[i+59][0].strftime("%Y-%m") if rows[i+59][0] else f"Period {i}"
+                        rolling_returns_5y.append({
+                            "period": period_lbl,
+                            "value": round(compound * 100, 2),
+                            "index": len(rolling_returns_5y)
+                        })
+
             latest = rows[-1]
             total_current_value = float(latest[2] or 0)
             total_contributions = float(latest[1] or 0)
             total_return_amount = float(latest[3] or 0)
             total_return_pct = float(latest[4] or 0)
-            total_fees = float(latest[7] or 0)
-            total_tax = float(latest[9] or 0)
-            total_divs = float(latest[8] or 0)
+            latest_cagr = float(latest[5] or 0)
+            latest_irr = float(latest[6] or 0)
             investment_count = int(latest[10] or 0)
             
             key_metrics = [
                 {"metric": "Total Value", "value": round(total_current_value, 2), "unit": base_currency, "formatted_value": f"{base_currency} {round(total_current_value, 2):,.2f}"},
                 {"metric": "Total Contributions", "value": round(total_contributions, 2), "unit": base_currency, "formatted_value": f"{base_currency} {round(total_contributions, 2):,.2f}"},
                 {"metric": "Total Return %", "value": round(total_return_pct, 2), "unit": "%", "formatted_value": f"{round(total_return_pct, 2):.2f}%"},
-                {"metric": "CAGR", "value": round(float(latest[5] or 0) * 100, 2), "unit": "%", "formatted_value": f"{round(float(latest[5] or 0) * 100, 2):.2f}%"},
-                {"metric": "IRR", "value": round(float(latest[6] or 0) * 100, 2), "unit": "%", "formatted_value": f"{round(float(latest[6] or 0) * 100, 2):.2f}%"},
+                {"metric": "CAGR", "value": round(latest_cagr * 100, 2), "unit": "%", "formatted_value": f"{round(latest_cagr * 100, 2):.2f}%"},
+                {"metric": "IRR", "value": round(latest_irr * 100, 2), "unit": "%", "formatted_value": f"{round(latest_irr * 100, 2):.2f}%"},
                 {"metric": "Active Investments", "value": investment_count, "unit": "count", "formatted_value": str(investment_count)}
             ]
             
-            conclusion = f"Portfolio performance: Total value {base_currency} {total_current_value:,.2f}, total contributions {base_currency} {total_contributions:,.2f}, net growth {base_currency} {total_return_amount:,.2f}."
-            
-            fee_analysis = []
-            tax_analysis = []
-            for idx, row in enumerate(rows):
-                date_str = row[0].strftime("%Y-%m") if row[0] else f"Period {idx}"
-                fees = float(row[7] or 0)
-                tax = float(row[9] or 0)
-                divs = float(row[8] or 0)
-                curr_val = float(row[2] or 0)
-                fee_analysis.append({
-                    "period": date_str,
-                    "fee_ratio": round((fees / curr_val * 100) if curr_val > 0 else 0, 4),
-                    "total_fees": round(fees, 2),
-                    "index": idx
-                })
-                tax_analysis.append({
-                    "period": date_str,
-                    "tax_ratio": round((tax / curr_val * 100) if curr_val > 0 else 0, 4),
-                    "total_tax": round(tax, 2),
-                    "index": idx
-                })
+            conclusion = f"Portfolio performance: Total value {base_currency} {total_current_value:,.2f}, total contributions {base_currency} {total_contributions:,.2f}, net growth {base_currency} {total_return_amount:,.2f} (CAGR: {latest_cagr*100:.2f}%, IRR: {latest_irr*100:.2f}%)."
             
             return Response(
                 json.dumps({
@@ -2004,14 +2053,14 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                         "three_year": rolling_returns_3y,
                         "five_year": rolling_returns_5y
                     },
-                    "risk_metrics": {"volatility": risk_metrics, "sharpe_ratio": [], "max_drawdown": []},
+                    "risk_metrics": {"volatility": risk_volatility, "sharpe_ratio": risk_sharpe, "max_drawdown": []},
                     "contribution_vs_growth": contribution_vs_growth,
                     "drawdown_analysis": [],
                     "dividend_yield": dividend_yield,
                     "fee_analysis": fee_analysis,
                     "tax_analysis": tax_analysis,
-                    "cagr_trend": portfolio_performance_return,
-                    "irr_trend": portfolio_performance_return,
+                    "cagr_trend": cagr_trend,
+                    "irr_trend": irr_trend,
                     "benchmarks": {"portfolio": [], "benchmark": []},
                     "key_metrics": key_metrics,
                     "conclusion": conclusion,
@@ -2020,9 +2069,9 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                     "base_currency": base_currency,
                     "data_points": len(rows),
                     "data_source": "database",
-                    "total_current_value": total_current_value,
-                    "total_return_amount": total_return_amount,
-                    "total_return_pct": total_return_pct
+                    "total_current_value": round(total_current_value, 2),
+                    "total_return_amount": round(total_return_amount, 2),
+                    "total_return_pct": round(total_return_pct, 2)
                 }),
                 media_type="application/json",
                 headers={"X-Cache": "MISS"}
