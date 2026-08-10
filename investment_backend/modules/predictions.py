@@ -4,13 +4,18 @@ import requests
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from .database import get_db_connection, DEFAULT_DB
+from .database import get_db_connection, DEFAULT_DB, get_config_value
 from .currency import NATIVE_CURRENCY, CURRENCY_SYMBOLS
 
 # Configuration constants
-PREDICTION_DAYS = 30  # Predict next 30 days
-CONFIDENCE_LEVEL = 0.95  # 95% confidence intervals
-TRAIN_RATIO = 0.8  # 80% training data
+PREDICTION_DAYS = int(get_config_value("prediction_horizon_days", "30"))  # Predict next N days
+CONFIDENCE_LEVEL = float(get_config_value("confidence_level", "0.95"))  # Confidence intervals
+TRAIN_RATIO = float(get_config_value("train_ratio", "0.8"))  # Training data ratio
+TF_API_TIMEOUT = int(get_config_value("tf_api_timeout", "5"))
+TF_TRAINING_TIMEOUT = int(get_config_value("tf_training_timeout", "600"))
+XGBOOST_RANDOM_STATE = int(get_config_value("xgboost_random_state", "42"))
+GP_RANDOM_STATE = int(get_config_value("gp_random_state", "42"))
+SYNTHETIC_DATA_SEED = int(get_config_value("synthetic_data_seed", "42"))
 
 # --- Prediction Library Imports ---
 # Check individual library availability
@@ -43,7 +48,7 @@ def _refresh_tf_api_status():
         _REMOTE_TF_AVAILABLE = False
         return
     try:
-        resp = requests.get(f"{TENSORFLOW_API_URL}/health", timeout=5)
+        resp = requests.get(f"{TENSORFLOW_API_URL}/health", timeout=TF_API_TIMEOUT)
         if resp.status_code == 200:
             _LIBRARIES_STATUS['tensorflow'] = True
             _REMOTE_TF_AVAILABLE = True
@@ -611,7 +616,8 @@ def check_stationarity(timeseries):
     try:
         result = adfuller(timeseries.dropna())
         return result[1] <= 0.05
-    except:
+    except Exception as e:
+        # print(f"Stationarity check failed: {e}")
         return False
 
 def make_stationary(timeseries, max_diff=2):
@@ -706,7 +712,7 @@ class StockPredictor:
             resp = requests.post(
                 f"{TENSORFLOW_API_URL}/predict/lstm",
                 json=payload,
-                timeout=600  # Remote model training can take a while
+                timeout=TF_TRAINING_TIMEOUT  # Remote model training can take a while
             )
             if resp.status_code != 200:
                 print(f"LSTM prediction failed (remote): HTTP {resp.status_code}: {resp.text[:300]}")
@@ -749,7 +755,7 @@ class StockPredictor:
             X_train, X_test = X[:train_size], X[train_size:]
             y_train, y_test = y[:train_size], y[train_size:]
 
-            model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42)
+            model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=6, random_state=XGBOOST_RANDOM_STATE)
             model.fit(X_train, y_train)
 
             last_features = X[-1:].copy()
@@ -846,7 +852,7 @@ class StockPredictor:
 
             # Kernel setup - more flexible for investment data
             kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2))
-            gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, random_state=42, alpha=0.1)
+            gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, random_state=GP_RANDOM_STATE, alpha=0.1)
             
             # Split for accuracy check
             train_size = int(len(X_scaled) * 0.8)
@@ -976,7 +982,9 @@ class StockPredictor:
         try:
             aic = fitted_model.aic
             return max(0.3, min(0.95, 1.0 - (aic / 1000)))
-        except:
+        except Exception as e:
+            import logging
+            logging.error(f"Accuracy calculation failed: {e}")
             return 0.7
 
     def get_available_models(self):
@@ -1084,13 +1092,13 @@ def get_investment_predictions(database_name, scope="portfolio", model_filter=No
                 "portfolio": 0.0003, "individual": 0.0001, "by_currency": 0.0002,
                 "by_type": 0.0004, "by_institution": 0.0005
             }
-            seed_map = {"portfolio": 42, "individual": 24, "by_currency": 33, "by_type": 55, "by_institution": 77}
+            seed_map = {"portfolio": SYNTHETIC_DATA_SEED, "individual": SYNTHETIC_DATA_SEED, "by_currency": SYNTHETIC_DATA_SEED, "by_type": SYNTHETIC_DATA_SEED, "by_institution": SYNTHETIC_DATA_SEED}
             
             historical_data = generate_historical_data(
                 base_date, days=365, 
                 volatility=volatility_map.get(scope, 0.015), 
                 trend=trend_map.get(scope, 0.0003), 
-                seed=seed_map.get(scope, 42)
+                seed=seed_map.get(scope, SYNTHETIC_DATA_SEED)
             )
 
         predictor = StockPredictor(scope=scope, horizon_days=PREDICTION_DAYS)

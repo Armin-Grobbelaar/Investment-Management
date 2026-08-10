@@ -48,33 +48,55 @@ def xirr(dates, amounts):
 
     dates = list(dates)
     amounts = list(amounts)
-    if len(dates) != len(amounts):
+    if len(dates) != len(amounts) or not amounts:
         return 0.0
     
     cashflows = sorted(zip(dates, amounts), key=lambda x: x[0])
     dates = [c[0] for c in cashflows]
     amounts = [c[1] for c in cashflows]
     
-    if not amounts:
+    # Check for total loss/all same sign
+    non_zeros = [a for a in amounts if abs(a) > 1e-10]
+    if not non_zeros:
         return 0.0
+    if all(a > 0 for a in non_zeros):
+        return 0.0 # theoretically inf
+    if all(a < 0 for a in non_zeros):
+        return -1.0 # Total loss
 
     start_date = dates[0]
-    
+    years = [fractional_years_between(start_date, d) for d in dates]
+
     def npv(rate):
+        if rate <= -1.0:
+            return float('inf')
         total = 0.0
-        for d, a in zip(dates, amounts):
-            if rate <= -1:
-                return float('inf')
-            # Actual/actual year fraction (leap years considered) — the same
-            # convention used for CAGR and inflation adjustment.
-            total += a / ((1 + rate) ** fractional_years_between(start_date, d))
+        for y, a in zip(years, amounts):
+            total += a / ((1 + rate) ** y)
         return total
 
+    # Newton's method with multiple initial guesses
+    for guess in [0.1, -0.2, 0.5, 1.5, -0.7, 5.0, 10.0, -0.9, -0.99]:
+        try:
+            res = optimize.newton(npv, guess, tol=1e-8, maxiter=100)
+            if res > -1.0 and abs(npv(res)) < 1e-2:
+                return res
+        except (RuntimeError, OverflowError, ZeroDivisionError):
+            pass
+
+    # Fallback to brentq with wide brackets
     try:
-        # Use brentq for more robust root finding in a sensible IRR range [-0.99, 1.0]
-        return optimize.brentq(npv, -0.99, 1.0)
-    except:
-        return 0.0
+        r_vals = [-0.9999, -0.99, -0.5, 0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 1000.0]
+        for i in range(len(r_vals) - 1):
+            if npv(r_vals[i]) * npv(r_vals[i+1]) < 0:
+                return optimize.brentq(npv, r_vals[i], r_vals[i+1])
+    except Exception:
+        pass
+        
+    # If no root found, return None instead of 0.0 to indicate failure
+    # (0.0% IRR is a valid and misleading value to return on failure)
+    return None
+
 
 def is_leap_year(year: int) -> bool:
     """Check whether a given year is a leap year."""
@@ -338,8 +360,32 @@ def calculate_investment_metrics(
                 investment_metrics.loc[row_name, "total return"] = net_growth / total_contrib
                 investment_metrics.loc[row_name, "return multiple"] = current_val / total_contrib
                 
+                # CAGR using Modified Dietz for money-weighted returns.
+                # This accounts for the timing of contributions, giving a more
+                # accurate return than simple (final/initial)^(1/n)-1.
                 if inv_period > 0 and current_val > 0:
-                    investment_metrics.loc[row_name, "cagr"] = (current_val / total_contrib) ** (1 / inv_period) - 1
+                    # Modified Dietz return:
+                    # R = (EMV - BMV - CF) / (BMV + Σ(wi × CFi))
+                    # With BMV=0 (inception), CF=total_contributions:
+                    # R = (EMV - total_contrib) / Σ(wi × contrib_i)
+                    # where wi = (valuation_date - contrib_date) / inv_period
+                    total_weighted_contrib = 0.0
+                    for _, row in contrib_df.iterrows():
+                        cf_date = row["date"]
+                        if isinstance(cf_date, str):
+                            cf_date = pd.to_datetime(cf_date)
+                        # Weight = fraction of period this cash flow was invested
+                        cf_years = fractional_years_between(cf_date, current_value_date)
+                        cf_weight = cf_years / inv_period
+                        total_weighted_contrib += row["contributions"] * cf_weight
+
+                    # Modified Dietz return (un-annualized period return)
+                    if total_weighted_contrib > 0:
+                        dietz_return = (current_val - total_contrib) / total_weighted_contrib
+                        investment_metrics.loc[row_name, "cagr"] = dietz_return
+                    else:
+                        # Fallback: all contributions at valuation date
+                        investment_metrics.loc[row_name, "cagr"] = 0.0
             
             # IRR Calculation
             try:
@@ -354,7 +400,8 @@ def calculate_investment_metrics(
                     pd.DataFrame({"date": [current_value_date], "amount": [current_val]})
                 ], ignore_index=True)
 
-                investment_metrics.loc[row_name, "irr"] = float(xirr(cashflows["date"], cashflows["amount"]))
+                irr_result = xirr(cashflows["date"], cashflows["amount"])
+                investment_metrics.loc[row_name, "irr"] = float(irr_result) if irr_result is not None else 0.0
             except:
                 investment_metrics.loc[row_name, "irr"] = 0.0
 
@@ -421,11 +468,29 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
             current_value = unit_price * units_held
             current_date = date.today()
             
-            # Get latest price date
+            # Get latest price date and latest transaction date
             cursor.execute("SELECT MAX(unit_price_date) FROM unit_prices WHERE investment_id = %s", (investment_id,))
             latest_date_row = cursor.fetchone()
             if latest_date_row and latest_date_row[0]:
                 current_date = latest_date_row[0]
+            
+            # The valuation date must be >= the last cash flow date.
+            # If transactions extend beyond the last price, use today's date
+            # so the XIRR terminal value is placed after all contributions.
+            cursor.execute(
+                "SELECT MAX(transaction_date) FROM transactions WHERE investment_id = %s",
+                (investment_id,)
+            )
+            max_txn_row = cursor.fetchone()
+            if max_txn_row and max_txn_row[0]:
+                max_txn = max_txn_row[0]
+                # Ensure current_date is at least as late as the last transaction
+                if isinstance(current_date, datetime):
+                    current_date_dt = current_date.date()
+                else:
+                    current_date_dt = current_date
+                if max_txn > current_date_dt:
+                    current_date = max_txn
 
             # 2. Get contributions
             query_contrib = "SELECT transaction_date as date, transaction_amount as contributions FROM transactions WHERE investment_id = %s AND LOWER(transaction_type) = 'buy'"
@@ -959,7 +1024,11 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> di
                        COALESCE(
                            (SELECT MAX(up.unit_price_date) FROM unit_prices up WHERE up.investment_id = i.id),
                            CURRENT_DATE
-                       ) AS value_date
+                       ) AS value_date,
+                       COALESCE(
+                           (SELECT MAX(t.transaction_date) FROM transactions t WHERE t.investment_id = i.id),
+                           CURRENT_DATE
+                       ) AS max_txn_date
                 FROM investments i
                 WHERE i.id IN ({ids_placeholder})""",
             investment_ids
@@ -1000,17 +1069,19 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> di
                 amounts.append(_convert(float(amt), curr))
 
         # Determine most recent value date across all investments
+        # Terminal value date must be >= the last cash flow for this investment
         value_date = None
         for row in current_values:
-            inv_id, price, units, curr, vdate = row
-            if vdate:
-                vdate_dt = pd.to_datetime(vdate)
-                if value_date is None or vdate_dt > value_date:
-                    value_date = vdate_dt
+            inv_id, price, units, curr, vdate, max_txn = row
+            # Use the later of price date and last transaction date
+            vd = pd.to_datetime(vdate) if vdate else pd.Timestamp.now()
+            md = pd.to_datetime(max_txn) if max_txn else pd.Timestamp.min
+            terminal_date = max(vd, md)
+            if value_date is None or terminal_date > value_date:
+                value_date = terminal_date
             if price and units:
                 val = _convert(float(price) * float(units), curr)
-                vd = pd.to_datetime(vdate) if vdate else pd.Timestamp.now()
-                dates.append(vd)
+                dates.append(terminal_date)
                 amounts.append(val)
 
         return dates, amounts, value_date
@@ -1024,7 +1095,8 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> di
         if not (neg and pos):
             return None
         try:
-            return float(xirr(dates, amounts))
+            result = xirr(dates, amounts)
+            return float(result) if result is not None else None
         except Exception:
             return None
 
@@ -1164,21 +1236,25 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             # Build query based on filter
             if filter_type == "portfolio":
                 # Portfolio-wide aggregation using LATEST metrics per investment
-                # This ensures we don't average in historical zero rows
+                # For ratios, we weight by contributions; for amounts we sum.
+                # This avoids averaging ratios which is mathematically invalid.
                 query = f"""
                     SELECT 
                         im.metrics_date,
-                        AVG({prefix}cagr) as cagr,
-                        AVG({prefix}irr) as irr,
-                        AVG({prefix}total_return) as total_return,
+                        CASE WHEN SUM({prefix}total_contributions) > 0
+                             THEN SUM({prefix}net_growth) / SUM({prefix}total_contributions)
+                             ELSE 0 END as total_return,
+                        CASE WHEN SUM({prefix}total_contributions) > 0
+                             THEN SUM({prefix}total_contributions) + SUM({prefix}net_growth)
+                             ELSE 0 END as total_current_value,
                         SUM({prefix}total_contributions) as total_contributions,
                         SUM({prefix}total_fees) as total_fees,
                         SUM({prefix}total_tax) as total_tax,
                         SUM({prefix}total_dividends) as total_dividends,
-                        AVG({prefix}dividend_yield) as dividend_yield,
-                        AVG({prefix}fee_ratio_annualized) as fee_ratio,
-                        AVG({prefix}tax_ratio_annualized) as tax_ratio,
-                        AVG({prefix}cost_ratio_annualized) as cost_ratio
+                        CASE WHEN SUM({prefix}total_contributions) > 0
+                             THEN SUM({prefix}total_dividends) / SUM({prefix}total_contributions)
+                             ELSE 0 END as dividend_yield,
+                        SUM({prefix}net_growth) as net_growth
                     FROM investment_metrics im
                     JOIN investments i ON im.investment_id = i.id
                     WHERE im.metrics_date = (
@@ -1239,7 +1315,7 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             # Convert dates
             df['metrics_date'] = pd.to_datetime(df['metrics_date'])
             
-            # Portfolio Performance Return (using CAGR)
+            # Portfolio Performance Return (using total_return which is portfolio-weighted)
             portfolio_performance_return = []
             cagr_trend = []
             irr_trend = []
@@ -1247,24 +1323,26 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
                     period = row['metrics_date'].strftime("%Y-%m")
-                    cagr_pct = round(float(row['cagr']) * 100, 2) if pd.notna(row['cagr']) else 0
-                    irr_pct = round(float(row['irr']) * 100, 2) if pd.notna(row['irr']) else 0
+                    # Use the properly computed total_return (portfolio-weighted)
+                    return_pct = round(float(row['total_return']) * 100, 2) if pd.notna(row['total_return']) else 0
                     
                     portfolio_performance_return.append({
                         "period": period,
-                        "value": cagr_pct,
+                        "value": return_pct,
                         "index": idx
                     })
                     
+                    # For portfolio filter, we store total_return as CAGR proxy
                     cagr_trend.append({
                         "period": period,
-                        "value": cagr_pct,
+                        "value": return_pct,
                         "index": idx
                     })
                     
+                    # IRR is computed separately via calculate_portfolio_irr
                     irr_trend.append({
                         "period": period,
-                        "value": irr_pct,
+                        "value": 0,  # placeholder; actual IRR comes from dedicated endpoint
                         "index": idx
                     })
                     
@@ -1308,7 +1386,7 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                             "index": len(rolling_returns["five_year"])
                         })
             
-            # Risk Metrics (volatility calculated from CAGR/IRR variance)
+            # Risk Metrics (volatility calculated from total_return variance)
             risk_metrics = {
                 "volatility": [],
                 "sharpe_ratio": [],
@@ -1316,10 +1394,10 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             }
             
             if filter_type == "portfolio":
-                # Calculate rolling volatility (12-month windows)
+                # Calculate rolling volatility (12-month windows) using total_return
                 for i in range(len(df) - 11):
                     period_df = df.iloc[i:i+12]
-                    volatility = period_df['cagr'].std() * 100 if len(period_df) > 1 else 0
+                    volatility = period_df['total_return'].std() * 100 if len(period_df) > 1 else 0
                     risk_metrics["volatility"].append({
                         "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
                         "value": round(float(volatility), 2) if pd.notna(volatility) else 0,
@@ -1329,8 +1407,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 # Sharpe ratio (simplified: avg_return / volatility)
                 for i in range(len(df) - 11):
                     period_df = df.iloc[i:i+12]
-                    avg_return = period_df['cagr'].mean()
-                    vol = period_df['cagr'].std()
+                    avg_return = period_df['total_return'].mean()
+                    vol = period_df['total_return'].std()
                     sharpe = (avg_return / vol) if vol > 0 else 0
                     risk_metrics["sharpe_ratio"].append({
                         "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
@@ -1343,7 +1421,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
                     contributions = float(row['total_contributions']) if pd.notna(row['total_contributions']) else 0
-                    growth = contributions * float(row['total_return']) if pd.notna(row['total_return']) else 0
+                    # Use net_growth directly (it's already summed correctly)
+                    growth = float(row['net_growth']) if pd.notna(row.get('net_growth', 0)) else 0
                     
                     contribution_vs_growth.append({
                         "period": row['metrics_date'].strftime("%Y-%m"),
@@ -1366,9 +1445,13 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             fee_analysis = []
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
+                    # Compute fee ratio from total_fees and total_contributions
+                    fee_ratio = 0.0
+                    if row['total_contributions'] > 0:
+                        fee_ratio = row['total_fees'] / row['total_contributions']
                     fee_analysis.append({
                         "period": row['metrics_date'].strftime("%Y-%m"),
-                        "fee_ratio": round(float(row['fee_ratio']) * 100, 3) if pd.notna(row['fee_ratio']) else 0,
+                        "fee_ratio": round(fee_ratio * 100, 3),
                         "total_fees": round(float(row['total_fees']), 2) if pd.notna(row['total_fees']) else 0,
                         "index": idx
                     })
@@ -1377,30 +1460,34 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             tax_analysis = []
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
+                    # Compute tax ratio from total_tax and total_contributions
+                    tax_ratio = 0.0
+                    if row['total_contributions'] > 0:
+                        tax_ratio = row['total_tax'] / row['total_contributions']
                     tax_analysis.append({
                         "period": row['metrics_date'].strftime("%Y-%m"),
-                        "tax_ratio": round(float(row['tax_ratio']) * 100, 3) if pd.notna(row['tax_ratio']) else 0,
+                        "tax_ratio": round(tax_ratio * 100, 3),
                         "total_tax": round(float(row['total_tax']), 2) if pd.notna(row['total_tax']) else 0,
                         "index": idx
                     })
             
             # Generate conclusion
             latest = df.iloc[-1]
-            avg_cagr = float(latest['cagr']) if pd.notna(latest['cagr']) else 0
-            avg_return = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
+            total_return_pct = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
+            total_contributions = float(latest['total_contributions']) if pd.notna(latest['total_contributions']) else 0
             total_fees = float(latest.get('total_fees', 0)) if pd.notna(latest.get('total_fees')) else 0
             
-            if avg_cagr > CAGR_EXCELLENT_THRESHOLD:
+            if total_return_pct > CAGR_EXCELLENT_THRESHOLD:
                 performance = "Excellent"
-            elif avg_cagr > CAGR_GOOD_THRESHOLD:
+            elif total_return_pct > CAGR_GOOD_THRESHOLD:
                 performance = "Good"
-            elif avg_cagr > CAGR_MODERATE_THRESHOLD:
+            elif total_return_pct > CAGR_MODERATE_THRESHOLD:
                 performance = "Moderate"
             else:
                 performance = "Needs Attention"
             
-            conclusion = f"{performance} {filter_type} performance with {avg_cagr*100:.2f}% annualized returns. "
-            conclusion += f"Total returns: {avg_return*100:.2f}%. "
+            conclusion = f"{performance} {filter_type} performance with {total_return_pct*100:.2f}% total return. "
+            conclusion += f"Total contributions: {base_currency} {total_contributions:,.2f}. "
             if total_fees > 0:
                 conclusion += f"Total fees paid: {base_currency} {total_fees:,.2f}."
             

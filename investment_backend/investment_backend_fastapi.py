@@ -51,13 +51,8 @@ _APP_START_TIME = datetime.now()
 # Default database name from environment
 DEFAULT_DB = os.getenv("INVESTMENTS_DB", "Investments")
 
-# Configuration Constants — loaded from the configuration table (with env-var override)
-# so they can be updated via the settings UI without a code redeploy.
-# The format is: os.environ.get(ENV_KEY) or get_config_value(TABLE_KEY, fallback)
-CACHE_TIMEOUT_SECONDS = int(os.environ.get("CACHE_TIMEOUT_SECONDS", "300"))
-DEFAULT_BASE_CURRENCY = os.environ.get("DEFAULT_BASE_CURRENCY", "ZAR")
-
-# --- Simulation / Risk model constants (sourced from DB configuration table) ---
+# Simulation / Risk model constants (sourced from DB configuration table) — resolved from the configuration table with
+# environment-variable override, then a built-in fallback (see _cfg_float/_cfg_int).
 def _cfg_float(env_key: str, table_key: str, default: float) -> float:
     """Resolve a float constant: env var first, then config table, then built-in default."""
     env_val = os.environ.get(env_key)
@@ -91,6 +86,14 @@ def _cfg_int(env_key: str, table_key: str, default: int) -> int:
     except Exception:
         pass
     return default
+
+# Configuration Constants — loaded from the configuration table (with env-var override)
+# so they can be updated via the settings UI without a code redeploy.
+CACHE_TIMEOUT_SECONDS = int(os.environ.get("CACHE_TIMEOUT_SECONDS", "300"))
+DEFAULT_BASE_CURRENCY = os.environ.get("DEFAULT_BASE_CURRENCY", "ZAR")
+GZIP_MIN_SIZE = _cfg_int("GZIP_MIN_SIZE", "gzip_min_size", 1000)
+
+# --- Simulation / Risk model constants (sourced from DB configuration table) ---
 
 DASHBOARD_DEFAULT_VALUE = _cfg_float("DASHBOARD_DEFAULT_VALUE", "dashboard_default_value", 100000.0)
 SIMULATION_YEARS = _cfg_int("SIMULATION_YEARS", "default_projection_years", 5)
@@ -185,7 +188,7 @@ async def lifespan(app: FastAPI):
 investment_api = FastAPI(lifespan=lifespan)
 
 # Add compression middleware for better performance
-investment_api.add_middleware(GZipMiddleware, minimum_size=1000)
+investment_api.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
 
 # In-memory cache for expensive operations (simple implementation)
 _cache_data = {}
@@ -237,13 +240,17 @@ class AddInvestmentRequest(BaseModel):
     investment_fee: float
     investment_status: str
 
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://localhost:3003",
-    "http://127.0.0.1:3003",
-    "http://192.168.10.100:3003"
-]
+cors_env = os.environ.get("CORS_ALLOWED_ORIGINS")
+if cors_env:
+    origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+else:
+    origins = [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:3003",
+        "http://127.0.0.1:3003",
+        "http://192.168.10.100:3003"
+    ]
 
 investment_api.add_middleware(
     CORSMiddleware,
@@ -1659,8 +1666,8 @@ async def bulk_import(file: UploadFile = File(...), import_type: str = Form(...)
         try:
             import os
             os.remove(temp_file)
-        except:
-            pass
+        except Exception:
+            pass  # Ignore cleanup errors
         
         return {
             "message": message or "Import completed",

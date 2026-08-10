@@ -19,48 +19,51 @@ def _cfg(env_key: str, table_key: str, default: str) -> str:
     return get_config_value(table_key, default)
 
 
-# SA Transfer Duty brackets (2024/25 tax year) - configurable via environment
+# SA Transfer Duty brackets (2025/26 tax year, effective 1 April 2025;
+# unchanged for 2026/27 per SARS "2027 – No changes from last year").
+# Source: https://www.sars.gov.za/tax-rates/transfer-duty/
+# Overridable via the configuration table key `transfer_duty_brackets`.
 TRANSFER_DUTY_BRACKETS = [
     {
         "lower": 0,
-        "upper": 1100000,
+        "upper": 1210000,
         "base": 0,
         "rate": 0.0
     },
     {
-        "lower": 1100000,
-        "upper": 1512500,
+        "lower": 1210000,
+        "upper": 1663800,
         "base": 0,
         "rate": 0.03,
-        "excess_from": 1100000
+        "excess_from": 1210000
     },
     {
-        "lower": 1512500,
-        "upper": 2117500,
-        "base": 12375,
+        "lower": 1663800,
+        "upper": 2329300,
+        "base": 13614,
         "rate": 0.06,
-        "excess_from": 1512500
+        "excess_from": 1663800
     },
     {
-        "lower": 2117500,
-        "upper": 2722500,
-        "base": 48675,
+        "lower": 2329300,
+        "upper": 2994800,
+        "base": 53544,
         "rate": 0.08,
-        "excess_from": 2117500
+        "excess_from": 2329300
     },
     {
-        "lower": 2722500,
-        "upper": 12100000,
-        "base": 97075,
+        "lower": 2994800,
+        "upper": 13310000,
+        "base": 106784,
         "rate": 0.11,
-        "excess_from": 2722500
+        "excess_from": 2994800
     },
     {
-        "lower": 12100000,
+        "lower": 13310000,
         "upper": float('inf'),
-        "base": 1128600,
+        "base": 1241456,
         "rate": 0.13,
-        "excess_from": 12100000
+        "excess_from": 13310000
     }
 ]
 
@@ -68,8 +71,10 @@ TRANSFER_DUTY_BRACKETS = [
 # environment-variable override, then a built-in fallback (see _cfg).
 DEFAULT_CGT_INCLUSION_RATE = float(_cfg("CGT_INCLUSION_RATE", "cgt_inclusion_rate", "0.40"))
 DEFAULT_CGT_MARGINAL_TAX_RATE = float(_cfg("CGT_MARGINAL_TAX_RATE", "cgt_marginal_tax_rate", "0.45"))
-DEFAULT_CGT_ANNUAL_EXCLUSION = float(_cfg("CGT_ANNUAL_EXCLUSION", "cgt_annual_exclusion", "40000"))
-DEFAULT_CGT_PRIMARY_RESIDENCE_EXCLUSION = float(_cfg("CGT_PRIMARY_RESIDENCE_EXCLUSION", "cgt_primary_residence_exclusion", "2000000"))
+# Annual exclusion and primary-residence exclusion updated from 2 March 2026
+# (Budget 2026 / SARS CGT rates page).
+DEFAULT_CGT_ANNUAL_EXCLUSION = float(_cfg("CGT_ANNUAL_EXCLUSION", "cgt_annual_exclusion", "50000"))
+DEFAULT_CGT_PRIMARY_RESIDENCE_EXCLUSION = float(_cfg("CGT_PRIMARY_RESIDENCE_EXCLUSION", "cgt_primary_residence_exclusion", "3000000"))
 DEFAULT_PROJECTION_YEARS = int(_cfg("PROPERTY_PROJECTION_YEARS", "default_projection_years", "20"))
 DEFAULT_MONTE_CARLO_SIMULATIONS = int(_cfg("MONTE_CARLO_SIMULATIONS", "monte_carlo_simulations", "1000"))
 DEFAULT_BOND_INTEREST_RATE = float(_cfg("DEFAULT_BOND_INTEREST_RATE", "default_bond_interest_rate", "11.75"))
@@ -81,7 +86,24 @@ DEFAULT_INFLATION_RATE = float(_cfg("DEFAULT_INFLATION_RATE", "default_inflation
 DEFAULT_PROPERTY_GROWTH_STD = float(os.environ.get("PROPERTY_GROWTH_STD", "2.5"))
 DEFAULT_RENTAL_GROWTH_STD = float(os.environ.get("RENTAL_GROWTH_STD", "2.0"))
 DEFAULT_INTEREST_RATE_STD = float(os.environ.get("INTEREST_RATE_STD", "1.5"))
-MONTE_CARLO_SEED = int(os.environ.get("MONTE_CARLO_SEED", "42"))
+
+def _cfg_float(env_key: str, table_key: str, default: float) -> float:
+    """Resolve a float constant: env var first, then config table, then built-in default."""
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    val = get_config_value(table_key)
+    if val is not None:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+MONTE_CARLO_SEED = int(_cfg_float("MONTE_CARLO_SEED", "monte_carlo_seed", 42))
 
 def calculate_pmt(principal: float, annual_rate: float, term_years: int) -> float:
     """Calculate monthly bond repayment using standard PMT formula."""
@@ -109,16 +131,34 @@ def calculate_remaining_bond(principal: float, annual_rate: float, term_years: i
 
 def calculate_sa_transfer_duty(purchase_price: float) -> float:
     """Calculate SA Transfer Duty using configurable brackets."""
-    for bracket in TRANSFER_DUTY_BRACKETS:
-        if bracket["lower"] < purchase_price <= bracket["upper"]:
-            if bracket["rate"] == 0.0:
+    import json
+    brackets_json = get_config_value("transfer_duty_brackets")
+    if brackets_json:
+        try:
+            brackets = json.loads(brackets_json)
+        except Exception:
+            brackets = TRANSFER_DUTY_BRACKETS
+    else:
+        brackets = TRANSFER_DUTY_BRACKETS
+
+    for bracket in brackets:
+        lower = bracket.get("lower", 0)
+        upper = bracket.get("upper", float('inf'))
+        if lower < purchase_price <= upper:
+            if bracket.get("rate", 0.0) == 0.0:
                 return 0.0
-            excess = purchase_price - bracket.get("excess_from", bracket["lower"])
-            return bracket["base"] + excess * bracket["rate"]
+            excess_from = bracket.get("excess_from", lower)
+            return bracket.get("base", 0.0) + (purchase_price - excess_from) * bracket["rate"]
+    
     # Default fallback to highest bracket
-    last_bracket = TRANSFER_DUTY_BRACKETS[-1]
-    excess = purchase_price - last_bracket.get("excess_from", last_bracket["lower"])
-    return last_bracket["base"] + excess * last_bracket["rate"]
+    if brackets:
+        last_bracket = brackets[-1]
+        lower = last_bracket.get("lower", 0)
+        upper = last_bracket.get("upper", float('inf'))
+        excess_from = last_bracket.get("excess_from", lower)
+        return last_bracket.get("base", 0.0) + (purchase_price - excess_from) * last_bracket.get("rate", 0.0)
+    
+    return 0.0
 
 def calculate_cgt(proceeds: float, base_cost: float, inclusion_rate: float = DEFAULT_CGT_INCLUSION_RATE, marginal_tax_rate: float = DEFAULT_CGT_MARGINAL_TAX_RATE, annual_exclusion: float = DEFAULT_CGT_ANNUAL_EXCLUSION, primary_residence_exclusion: float = 0.0) -> dict:
     """Calculate SA Capital Gains Tax on disposal.
@@ -267,7 +307,9 @@ def run_property_projection(
         try:
             nominal_irr = npf.irr(flows) * 100
             real_irr = ((1 + nominal_irr/100) / (1 + inflation) - 1) * 100
-        except:
+        except Exception as e:
+            import logging
+            logging.error(f"Property IRR calculation failed for year {sell_year}: {e}")
             nominal_irr = 0.0
             real_irr = 0.0
             

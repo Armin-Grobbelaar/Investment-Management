@@ -6,6 +6,7 @@ Functions for FastAPI endpoints and API-related operations.
 
 import json
 import os
+import logging
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
@@ -391,8 +392,9 @@ def import_investment_data_api(data_type: str, file_content, investment_name: st
         try:
             import os
             os.remove(temp_file_name)
-        except:
-            pass  # Ignore cleanup errors
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to clean up temp file: {e}")
 
         return {"message": message, "data_type": data_type, "investment_name": investment_name if data_type != 'inflation' else None}
 
@@ -401,9 +403,11 @@ def import_investment_data_api(data_type: str, file_content, investment_name: st
         try:
             import os
             os.remove(f"temp_{data_type}.csv")
-        except:
-            pass
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to clean up temp file on error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def invalidate_cache_api(database_name: str = None):
     """Invalidate cached data."""
@@ -1218,12 +1222,12 @@ def _sanitize_value(value, pg_type: str, nullable: bool):
     # Integer coercion (frontend may send numeric strings or floats)
     if pg_type in _INT_TYPES:
         try:   return int(float(str(value)))
-        except: return None if nullable else 0
+        except Exception as e: return None if nullable else 0
 
     # Float coercion
     if pg_type in _FLOAT_TYPES:
         try:   return float(str(value))
-        except: return None if nullable else 0.0
+        except Exception as e: return None if nullable else 0.0
 
     # Date coercion — accept ISO strings or datetime objects
     if pg_type in _DATE_TYPES:
@@ -1231,7 +1235,7 @@ def _sanitize_value(value, pg_type: str, nullable: bool):
         try:
             from datetime import date as _date
             return _date.fromisoformat(str(value)[:10])
-        except: return None if nullable else None
+        except Exception as e: return None if nullable else None
 
     # Timestamp coercion
     if pg_type in _TS_TYPES:

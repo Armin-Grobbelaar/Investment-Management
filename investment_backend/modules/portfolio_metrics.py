@@ -67,7 +67,7 @@ def calculate_and_store_portfolio_metrics(database_name: str) -> int:
             agg_funcs = {
                 'local_total_contributions': 'sum',
                 'local_current_value': 'sum',
-                'local_total_return': 'sum',
+                'local_net_growth': 'sum',   # net growth is a dollar amount; sum it
                 'local_total_fees': 'sum',
                 'local_total_dividends': 'sum',
                 'local_total_tax': 'sum',
@@ -88,15 +88,16 @@ def calculate_and_store_portfolio_metrics(database_name: str) -> int:
                         
                         contrib = float(row['local_total_contributions'])
                         current_val = float(row['local_current_value'])
-                        ret_amt = float(row['local_total_return'])
+                        net_growth = float(row['local_net_growth'])
                         fees = float(row['local_total_fees'])
                         divs = float(row['local_total_dividends'])
                         tax = float(row['local_total_tax'])
                         count = int(row['investment_name'])
                         
+                        # Return percentage = (current_value - contributions) / contributions
                         ret_pct = 0.0
                         if contrib > 0:
-                            ret_pct = (ret_amt / contrib) * 100
+                            ret_pct = ((current_val - contrib) / contrib) * 100
                             
                         # Simplified CAGR/IRR approximation for aggregates (since we don't have full cashflows here)
                         # The real way to do IRR for aggregates is to sum cashflows per day, which is expensive.

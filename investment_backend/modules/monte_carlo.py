@@ -97,7 +97,9 @@ def run_portfolio_monte_carlo(database_name: str, dimension_type: str, dimension
             val_str = str(km.get("value", "0")).replace("R", "").replace(",", "").strip()
             try:
                 current_value = float(val_str)
-            except:
+            except ValueError as ve:
+                import logging
+                logging.error(f"Failed to parse total value '{val_str}': {ve}")
                 current_value = 0
             break
     
