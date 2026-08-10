@@ -222,11 +222,8 @@ def get_investment_types_in_portfolio(database_name: str = DEFAULT_DB) -> list:
 
 def get_all_investment_values(database_name):
     """
-    Legacy function - kept for backwards compatibility.
-    New code should use get_investment_data() with currency conversion.
+    Get investment time series values calculated using cumulative units held over time.
     """
-    # Note: We are using create_connection here because the original code used globals
-    # But we will try to make it local.
     conn, cursor = create_connection(database_name)
 
     try:
@@ -235,73 +232,77 @@ def get_all_investment_values(database_name):
         colnames = [desc[0] for desc in cursor.description] if cursor.description else []
         investments = pd.DataFrame(rows, columns=colnames)
 
-        unit_price_query = """
-            WITH cte AS (
-            SELECT
-                v_investment_prices.investment_id AS id,
-                v_investment_prices.unit_price_date,
-                v_investment_prices.unit_price,
-                COALESCE(total_units_held, 0) AS total_units_held,
-                MAX(CASE WHEN total_units_held > 0 THEN v_investment_prices.unit_price_date END)
-                    OVER (PARTITION BY v_investment_prices.investment_id ORDER BY v_investment_prices.unit_price_date) AS last_non_zero_date
-            FROM v_investment_prices
-            LEFT JOIN (
-                SELECT
-                    investment_id,
-                    transaction_date,
-                    SUM(number_of_units) AS total_units_held
-                FROM transactions
-                GROUP BY investment_id, transaction_date
-            ) AS transaction_totals ON v_investment_prices.investment_id = transaction_totals.investment_id
-                                    AND v_investment_prices.unit_price_date = transaction_totals.transaction_date
-        )
-        SELECT
-            id,
-            unit_price_date,
-            unit_price,
-            COALESCE(total_units_held, 0) AS total_units_held
-        FROM cte
-        ORDER BY id, unit_price_date ASC;
-        """
+        cursor.execute("""
+            SELECT investment_id, transaction_date, transaction_type, number_of_units
+            FROM transactions
+            ORDER BY investment_id, transaction_date
+        """)
+        txns = cursor.fetchall()
 
-        cursor.execute(unit_price_query)
-        unit_prices = pd.DataFrame(cursor.fetchall(),
-                                 columns=["id", "unit_price_date", "unit_price", "total_units_held"])
+        import bisect
+        inv_txns = {}
+        for inv_id, tdate, ttype, units in txns:
+            if inv_id not in inv_txns:
+                inv_txns[inv_id] = []
+            ttype_lower = (ttype or "").lower()
+            if ttype_lower in ('buy', 'switch_in'):
+                net = float(units)
+            elif ttype_lower in ('sell', 'switch_out'):
+                net = -abs(float(units))
+            else:
+                net = 0.0
+            inv_txns[inv_id].append((tdate, net))
 
-        unit_prices["total_units_held"] = unit_prices.groupby('id')['total_units_held'].cumsum()
+        inv_cum_units = {}
+        for inv_id, events in inv_txns.items():
+            events.sort(key=lambda x: x[0])
+            timeline = []
+            cum = 0.0
+            for d, u in events:
+                cum += u
+                timeline.append((d, cum))
+            inv_cum_units[inv_id] = timeline
 
-        # We don't really need transactions df here as it was unused in the snippet, 
-        # but the query was executed.
+        def _get_units_on_date(inv_id, target_date, fallback_units, init_date):
+            if inv_id in inv_cum_units:
+                timeline = inv_cum_units[inv_id]
+                idx = bisect.bisect_right(timeline, (target_date, float('inf'))) - 1
+                if idx >= 0:
+                    return max(0.0, timeline[idx][1])
+                return 0.0
+            else:
+                if init_date and target_date >= init_date:
+                    return float(fallback_units or 0.0)
+                return 0.0
+
+        cursor.execute("""
+            SELECT v.investment_id AS id, i.investment_name, i.unit_currency, i.investment_type,
+                   i.institution_name, i.initial_investment_date, i.number_of_units_held,
+                   v.unit_price_date, v.unit_price
+            FROM v_investment_prices v
+            JOIN investments i ON v.investment_id = i.id
+            ORDER BY v.investment_id, v.unit_price_date ASC
+        """)
+        price_rows = cursor.fetchall()
         
-        investment_values = pd.DataFrame(columns = ["id", "investment_name", "unit_price_date",
-                                                  "unit_price", "number_of_units", "investment_value",
-                                                  "unit_currency", "investment_type"])
-        investment_values["unit_price_date"] = pd.to_datetime(investment_values["unit_price_date"])
+        data = []
+        for inv_id, inv_name, currency, inv_type, inst_name, init_date, held_units, pdate, price in price_rows:
+            units = _get_units_on_date(inv_id, pdate, held_units, init_date)
+            value = units * float(price)
+            data.append({
+                "id": inv_id,
+                "investment_name": inv_name,
+                "unit_currency": currency,
+                "investment_type": inv_type,
+                "institution_name": inst_name,
+                "unit_price_date": pd.to_datetime(pdate),
+                "unit_price": float(price),
+                "total_units_held": units,
+                "number_of_units": units,
+                "investment_value": value
+            })
 
-        all_investment_id = pd.DataFrame()
-        all_investment_id["id"] = investments["id"]
-        all_investment_id["investment_name"] = investments["investment_name"]
-        # all_investment_id["total_units_held"] = 0  # Removed to avoid merge collision
-        all_investment_id["unit_currency"] = investments["unit_currency"]
-        all_investment_id["investment_type"] = investments["investment_type"]
-        all_investment_id["institution_name"] = investments["institution_name"]
-
-        unit_prices.sort_values(by="unit_price_date", inplace=True)
-        unit_prices.reset_index(drop=True, inplace=True)
-
-        # Merge unit prices with investment info
-        unit_prices = pd.merge(all_investment_id, unit_prices, on="id", how="left")
-        
-        # Fill NaN values for total_units_held with 0
-        if "total_units_held" in unit_prices.columns:
-            unit_prices["total_units_held"] = unit_prices["total_units_held"].fillna(0)
-        else:
-            unit_prices["total_units_held"] = 0
-
-        investment_values = unit_prices.copy()
-        investment_values["investment_value"] = investment_values["unit_price"] * investment_values["total_units_held"]
-        
-        return investment_values
+        return pd.DataFrame(data)
 
     finally:
         conn.close()

@@ -88,15 +88,33 @@ def wipe_and_reseed():
         
         # Seed transactions
         for ticker, inv_id in inv_ids.items():
-            base_amount = random.uniform(5000, 50000)
+            base_amount = random.uniform(5000, 20000)
+            total_units_bought = 0.0
             for i in range(10):
                 t_date = date(2023, 1, 1) + timedelta(days=i*90)
                 if t_date > date.today(): break
+                
+                # Fetch exact or nearest previous unit price for transaction date
+                cur.execute("""
+                    SELECT unit_price FROM unit_prices 
+                    WHERE investment_id = %s AND unit_price_date <= %s 
+                    ORDER BY unit_price_date DESC LIMIT 1
+                """, (inv_id, t_date))
+                res = cur.fetchone()
+                price_on_date = float(res[0]) if res else float(p_init)
+                units = base_amount / price_on_date
+                total_units_bought += units
+
                 cur.execute("""
                     INSERT INTO transactions (investment_id, transaction_date, transaction_type, transaction_amount, unit_price, number_of_units)
                     VALUES (%s, %s, 'buy', %s, %s, %s)
-                """, (inv_id, t_date, base_amount, 100, base_amount/100))
-            
+                """, (inv_id, t_date, base_amount, price_on_date, units))
+
+            # Update investments table with actual total units held
+            cur.execute("""
+                UPDATE investments SET number_of_units_held = %s WHERE id = %s
+            """, (total_units_bought, inv_id))
+
             # Seed some dividends
             for i in range(4):
                 d_date = date(2023, 3 + i*3, 15)

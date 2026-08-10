@@ -360,32 +360,16 @@ def calculate_investment_metrics(
                 investment_metrics.loc[row_name, "total return"] = net_growth / total_contrib
                 investment_metrics.loc[row_name, "return multiple"] = current_val / total_contrib
                 
-                # CAGR using Modified Dietz for money-weighted returns.
-                # This accounts for the timing of contributions, giving a more
-                # accurate return than simple (final/initial)^(1/n)-1.
+                # CAGR: Compound Annual Growth Rate.
+                # Uses the return multiple (current_val / total_contributions) annualized
+                # over the investment period. This is the standard definition:
+                #   CAGR = (EMV / total_contributions)^(1/years) - 1
+                # For a single lump sum it equals the IRR; for multiple contributions
+                # it is a simple time-weighted approximation. The IRR (XIRR) field
+                # captures the full money-weighted (cash-flow-timing-aware) return.
                 if inv_period > 0 and current_val > 0:
-                    # Modified Dietz return:
-                    # R = (EMV - BMV - CF) / (BMV + Σ(wi × CFi))
-                    # With BMV=0 (inception), CF=total_contributions:
-                    # R = (EMV - total_contrib) / Σ(wi × contrib_i)
-                    # where wi = (valuation_date - contrib_date) / inv_period
-                    total_weighted_contrib = 0.0
-                    for _, row in contrib_df.iterrows():
-                        cf_date = row["date"]
-                        if isinstance(cf_date, str):
-                            cf_date = pd.to_datetime(cf_date)
-                        # Weight = fraction of period this cash flow was invested
-                        cf_years = fractional_years_between(cf_date, current_value_date)
-                        cf_weight = cf_years / inv_period
-                        total_weighted_contrib += row["contributions"] * cf_weight
-
-                    # Modified Dietz return (un-annualized period return)
-                    if total_weighted_contrib > 0:
-                        dietz_return = (current_val - total_contrib) / total_weighted_contrib
-                        investment_metrics.loc[row_name, "cagr"] = dietz_return
-                    else:
-                        # Fallback: all contributions at valuation date
-                        investment_metrics.loc[row_name, "cagr"] = 0.0
+                    return_multiple = current_val / total_contrib
+                    investment_metrics.loc[row_name, "cagr"] = return_multiple ** (1.0 / inv_period) - 1
             
             # IRR Calculation
             try:
@@ -899,6 +883,17 @@ def get_investment_metrics_by_name_data(database_name: str, investment_name: str
         "data_points": len(rows),
         "generated_at": datetime.now().isoformat(),
         "base_currency": BASE_CURRENCY_CODE,
+        # Top-level summary values consumed by MetricCard widgets in the frontend
+        "total_current_value": key_metrics["total_current_value"],
+        "total_return_amount": key_metrics["total_return"],   # net growth in currency
+        "total_return_pct": key_metrics["total_return_pct"],
+        "thresholds": {
+            "excellent_sharpe": EXCELLENT_SHARPE_RATIO,
+            "good_sharpe": GOOD_SHARPE_RATIO,
+            "good_volatility": GOOD_VOLATILITY_THRESHOLD,
+            "excellent_cagr": CAGR_EXCELLENT_THRESHOLD,
+            "good_cagr": CAGR_GOOD_THRESHOLD
+        }
     }
 
 def recalculate_investment_metrics_history(database_name: str = DEFAULT_DB) -> None:
@@ -1238,6 +1233,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 # Portfolio-wide aggregation using LATEST metrics per investment
                 # For ratios, we weight by contributions; for amounts we sum.
                 # This avoids averaging ratios which is mathematically invalid.
+                # We also pull investment_period so we can compute annualised CAGR
+                # per investment and weight it by contributions.
                 query = f"""
                     SELECT 
                         im.metrics_date,
@@ -1254,7 +1251,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                         CASE WHEN SUM({prefix}total_contributions) > 0
                              THEN SUM({prefix}total_dividends) / SUM({prefix}total_contributions)
                              ELSE 0 END as dividend_yield,
-                        SUM({prefix}net_growth) as net_growth
+                        SUM({prefix}net_growth) as net_growth,
+                        MAX({prefix}investment_period) as max_investment_period
                     FROM investment_metrics im
                     JOIN investments i ON im.investment_id = i.id
                     WHERE im.metrics_date = (
@@ -1323,22 +1321,29 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
                     period = row['metrics_date'].strftime("%Y-%m")
-                    # Use the properly computed total_return (portfolio-weighted)
-                    return_pct = round(float(row['total_return']) * 100, 2) if pd.notna(row['total_return']) else 0
-                    
+                    # total_return = net_growth / total_contributions (cumulative since inception)
+                    total_return = float(row['total_return']) if pd.notna(row['total_return']) else 0
+                    return_pct = round(total_return * 100, 2)
+
+                    # Compute annualised CAGR from return multiple and investment period
+                    inv_period = float(row.get('max_investment_period') or 0)
+                    if inv_period > 0 and total_return > -1:
+                        cagr_val = round(((1 + total_return) ** (1.0 / inv_period) - 1) * 100, 2)
+                    else:
+                        cagr_val = return_pct  # fallback when period unknown
+
                     portfolio_performance_return.append({
                         "period": period,
                         "value": return_pct,
                         "index": idx
                     })
-                    
-                    # For portfolio filter, we store total_return as CAGR proxy
+
                     cagr_trend.append({
                         "period": period,
-                        "value": return_pct,
+                        "value": cagr_val,
                         "index": idx
                     })
-                    
+
                     # IRR is computed separately via calculate_portfolio_irr
                     irr_trend.append({
                         "period": period,
@@ -1353,68 +1358,97 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 "five_year": []
             }
             
-            if filter_type == "portfolio" and len(df) >= 12:
-                # Calculate 1-year rolling returns
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    avg_return = period_df['total_return'].mean() * 100
-                    rolling_returns["one_year"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
-                        "index": i
-                    })
-                
-                # Calculate 3-year rolling returns
-                if len(df) >= 36:
-                    for i in range(0, len(df) - 35, 3):
-                        period_df = df.iloc[i:i+36]
-                        avg_return = period_df['total_return'].mean() * 100
+            if filter_type == "portfolio" and len(df) >= 2:
+                # Compute period-over-period returns from consecutive total_current_value.
+                # This gives the actual periodic return for each time step, which is
+                # the correct input for rolling windows and risk metrics.
+                # periodic_ret[i] = (value[i] - value[i-1]) / value[i-1]
+                cv = df['total_current_value'].values.astype(float)
+                periodic_rets = []
+                for i in range(1, len(cv)):
+                    if cv[i-1] > 0:
+                        periodic_rets.append((cv[i] - cv[i-1]) / cv[i-1])
+                    else:
+                        periodic_rets.append(0.0)
+                periodic_ser = pd.Series(periodic_rets, index=df.index[1:])
+
+                if len(periodic_ser) >= 11:
+                    # 1-year (12-step) rolling: annualised return of each window
+                    for i in range(len(periodic_ser) - 10):
+                        window = periodic_ser.iloc[i:i+12]
+                        # Geometric compounding over window
+                        compound = float(np.prod(1 + window)) - 1
+                        rolling_returns["one_year"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(compound * 100, 2),
+                            "index": i
+                        })
+
+                if len(periodic_ser) >= 35:
+                    # 3-year (36-step) rolling
+                    for i in range(0, len(periodic_ser) - 34, 3):
+                        window = periodic_ser.iloc[i:i+36]
+                        compound = float(np.prod(1 + window)) - 1
                         rolling_returns["three_year"].append({
-                            "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-Q%q"),
-                            "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
+                            "period": df.iloc[i+36]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(compound * 100, 2),
                             "index": len(rolling_returns["three_year"])
                         })
-                
-                # Calculate 5-year rolling returns
-                if len(df) >= 60:
-                    for i in range(0, len(df) - 59, 6):
-                        period_df = df.iloc[i:i+60]
-                        avg_return = period_df['total_return'].mean() * 100
+
+                if len(periodic_ser) >= 59:
+                    # 5-year (60-step) rolling
+                    for i in range(0, len(periodic_ser) - 58, 6):
+                        window = periodic_ser.iloc[i:i+60]
+                        compound = float(np.prod(1 + window)) - 1
                         rolling_returns["five_year"].append({
-                            "period": period_df.iloc[-1]['metrics_date'].strftime("%Y"),
-                            "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
+                            "period": df.iloc[i+60]['metrics_date'].strftime("%Y"),
+                            "value": round(compound * 100, 2),
                             "index": len(rolling_returns["five_year"])
                         })
-            
-            # Risk Metrics (volatility calculated from total_return variance)
+
+            # Risk Metrics: volatility and Sharpe computed on periodic returns
             risk_metrics = {
                 "volatility": [],
                 "sharpe_ratio": [],
                 "max_drawdown": []
             }
-            
-            if filter_type == "portfolio":
-                # Calculate rolling volatility (12-month windows) using total_return
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    volatility = period_df['total_return'].std() * 100 if len(period_df) > 1 else 0
-                    risk_metrics["volatility"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(volatility), 2) if pd.notna(volatility) else 0,
-                        "index": i
-                    })
-                
-                # Sharpe ratio (simplified: avg_return / volatility)
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    avg_return = period_df['total_return'].mean()
-                    vol = period_df['total_return'].std()
-                    sharpe = (avg_return / vol) if vol > 0 else 0
-                    risk_metrics["sharpe_ratio"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(sharpe), 2) if pd.notna(sharpe) else 0,
-                        "index": i
-                    })
+
+            if filter_type == "portfolio" and len(df) >= 2:
+                cv = df['total_current_value'].values.astype(float)
+                periodic_rets = []
+                for i in range(1, len(cv)):
+                    if cv[i-1] > 0:
+                        periodic_rets.append((cv[i] - cv[i-1]) / cv[i-1])
+                    else:
+                        periodic_rets.append(0.0)
+                periodic_ser = pd.Series(periodic_rets, index=df.index[1:])
+
+                # Annualised volatility using 12-month rolling window.
+                # Multiply by sqrt(12) to annualise from monthly periodic returns.
+                annualise = float(np.sqrt(12))
+                if len(periodic_ser) >= 12:
+                    for i in range(len(periodic_ser) - 11):
+                        window = periodic_ser.iloc[i:i+12]
+                        vol = float(window.std(ddof=1)) * annualise * 100
+                        risk_metrics["volatility"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(vol, 2) if not np.isnan(vol) else 0,
+                            "index": i
+                        })
+
+                # Sharpe ratio: (annualised_return / annualised_vol) per 12-month window.
+                # Risk-free rate assumed 0 for simplicity (can be made configurable).
+                if len(periodic_ser) >= 12:
+                    for i in range(len(periodic_ser) - 11):
+                        window = periodic_ser.iloc[i:i+12]
+                        ann_ret = float(np.prod(1 + window) - 1)  # geometric annual
+                        ann_vol = float(window.std(ddof=1)) * annualise
+                        sharpe = (ann_ret / ann_vol) if ann_vol > 0 else 0
+                        risk_metrics["sharpe_ratio"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(sharpe, 4) if not np.isnan(sharpe) else 0,
+                            "index": i
+                        })
             
             # Contribution vs Growth
             contribution_vs_growth = []
@@ -1473,24 +1507,34 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             
             # Generate conclusion
             latest = df.iloc[-1]
-            total_return_pct = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
+            total_return_ratio = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
             total_contributions = float(latest['total_contributions']) if pd.notna(latest['total_contributions']) else 0
+            total_net_growth = float(latest.get('net_growth', 0)) if pd.notna(latest.get('net_growth')) else 0
+            total_current_value_latest = float(latest.get('total_current_value', 0)) if pd.notna(latest.get('total_current_value')) else 0
             total_fees = float(latest.get('total_fees', 0)) if pd.notna(latest.get('total_fees')) else 0
-            
-            if total_return_pct > CAGR_EXCELLENT_THRESHOLD:
+
+            # Compute annualised CAGR for the conclusion and threshold check
+            inv_period_latest = float(latest.get('max_investment_period') or 0)
+            if inv_period_latest > 0 and total_return_ratio > -1:
+                cagr_latest = ((1 + total_return_ratio) ** (1.0 / inv_period_latest)) - 1
+            else:
+                cagr_latest = total_return_ratio
+
+            if cagr_latest > CAGR_EXCELLENT_THRESHOLD:
                 performance = "Excellent"
-            elif total_return_pct > CAGR_GOOD_THRESHOLD:
+            elif cagr_latest > CAGR_GOOD_THRESHOLD:
                 performance = "Good"
-            elif total_return_pct > CAGR_MODERATE_THRESHOLD:
+            elif cagr_latest > CAGR_MODERATE_THRESHOLD:
                 performance = "Moderate"
             else:
                 performance = "Needs Attention"
-            
-            conclusion = f"{performance} {filter_type} performance with {total_return_pct*100:.2f}% total return. "
+
+            conclusion = f"{performance} {filter_type} performance with {total_return_ratio*100:.2f}% total return "
+            conclusion += f"({cagr_latest*100:.2f}% p.a. CAGR). "
             conclusion += f"Total contributions: {base_currency} {total_contributions:,.2f}. "
             if total_fees > 0:
                 conclusion += f"Total fees paid: {base_currency} {total_fees:,.2f}."
-            
+
             return {
                 "portfolio_performance_return": portfolio_performance_return,
                 "rolling_returns": rolling_returns,
@@ -1508,6 +1552,10 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 "base_currency": base_currency,
                 "data_points": len(df),
                 "data_source": "DATABASE",
+                # Top-level summary values consumed by MetricCard widgets in the frontend
+                "total_current_value": round(total_current_value_latest, 2),
+                "total_return_amount": round(total_net_growth, 2),
+                "total_return_pct": round(total_return_ratio * 100, 2),
                 "thresholds": {
                     "excellent_sharpe": EXCELLENT_SHARPE_RATIO,
                     "good_sharpe": GOOD_SHARPE_RATIO,

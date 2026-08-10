@@ -98,6 +98,9 @@ def calculate_and_store_portfolio_metrics(database_name: str) -> int:
                         ret_pct = 0.0
                         if contrib > 0:
                             ret_pct = ((current_val - contrib) / contrib) * 100
+
+                        # Absolute return amount (net growth in currency)
+                        ret_amt = net_growth
                             
                         # Simplified CAGR/IRR approximation for aggregates (since we don't have full cashflows here)
                         # The real way to do IRR for aggregates is to sum cashflows per day, which is expensive.
