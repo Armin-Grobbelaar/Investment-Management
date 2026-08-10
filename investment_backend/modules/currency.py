@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from .database import get_db_connection, DEFAULT_DB, get_config_value
 
@@ -13,7 +14,12 @@ NATIVE_CURRENCY = get_config_value("native_currency", "R") or "R"
 # Sourced from the configuration table; the base_currency key defines which
 # one is the default display currency.
 DEFAULT_BASE_CURRENCY = get_config_value("base_currency", "ZAR") or "ZAR"
-SUPPORTED_BASE_CURRENCIES = ["ZAR", "USD", "EUR", "GBP"]
+
+_supported_env = os.environ.get("SUPPORTED_BASE_CURRENCIES")
+if _supported_env:
+    SUPPORTED_BASE_CURRENCIES = [c.strip().upper() for c in _supported_env.split(",") if c.strip()]
+else:
+    SUPPORTED_BASE_CURRENCIES = ["ZAR", "USD", "EUR", "GBP"]
 
 
 def resolve_currency_code(value: str) -> str:

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Container, Paper, Button, IconButton, Box, Typography, Grid, Card, CardContent,
     TextField, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
@@ -20,6 +20,8 @@ import { Line } from 'react-chartjs-2';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DownloadIcon from '@mui/icons-material/Download';
 
+const DB_NAME = process.env.NEXT_PUBLIC_DB_NAME || 'Investments';
+
 export default function PropertyAnalysis() {
     const router = useRouter();
     const [darkMode, setDarkMode] = useState(true);
@@ -31,6 +33,7 @@ export default function PropertyAnalysis() {
     const [sensitivity, setSensitivity] = useState<any>(null);
     const [monteCarlo, setMonteCarlo] = useState<any>(null);
     const [downloadingPdf, setDownloadingPdf] = useState(false);
+    const [configLoaded, setConfigLoaded] = useState(false);
 
     const theme = darkMode ? brandingDarkTheme : brandingLightTheme;
 
@@ -62,6 +65,41 @@ export default function PropertyAnalysis() {
         cgt_marginal_tax_rate: 0.45,
         is_primary_residence: false
     });
+
+    // Fetch configurable default rates from the backend configuration table
+    // so property analysis uses the same values as the backend calculators.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await axios.get(`/api/config/${DB_NAME}`);
+                const cfg: Record<string, string> = res.data?.settings || res.data || {};
+                const num = (key: string, fallback: number) => {
+                    const v = cfg[key];
+                    if (v === undefined || v === null || v === '') return fallback;
+                    const n = Number(v);
+                    return Number.isFinite(n) ? n : fallback;
+                };
+                if (!cancelled) {
+                    setInputs(prev => ({
+                        ...prev,
+                        bond_interest_rate: num('default_bond_interest_rate', prev.bond_interest_rate),
+                        rental_growth_rate_pa: num('default_rental_growth_rate', prev.rental_growth_rate_pa),
+                        vacancy_rate_pct: num('default_vacancy_rate', prev.vacancy_rate_pct),
+                        property_growth_rate_pa: num('default_property_growth_rate', prev.property_growth_rate_pa),
+                        inflation_rate: num('default_inflation_rate', prev.inflation_rate),
+                        projection_years: num('default_projection_years', prev.projection_years),
+                        cgt_inclusion_rate: num('cgt_inclusion_rate', prev.cgt_inclusion_rate),
+                        cgt_marginal_tax_rate: num('cgt_marginal_tax_rate', prev.cgt_marginal_tax_rate),
+                    }));
+                    setConfigLoaded(true);
+                }
+            } catch (err) {
+                console.error('Failed to load config defaults:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     const handleChange = (e: any) => {
         const { name, value } = e.target;

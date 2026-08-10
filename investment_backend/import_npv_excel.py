@@ -40,26 +40,10 @@ def get_connection():
 
 def xirr(cashflows):
     """Compute XIRR from [(date, amount)] where amount<0 = outflow."""
-    from scipy.optimize import brentq
-    if len(cashflows) < 2:
-        return 0.0
-    cashflows = sorted(cashflows, key=lambda x: x[0])
-    t0 = cashflows[0][0]
-
-    def npv(r):
-        return sum(amt / (1 + r) ** ((dt - t0).days / 365.0) for dt, amt in cashflows)
-
-    try:
-        return brentq(npv, -0.999, 10.0)
-    except Exception:
-        for r in range(-90, 1000):
-            rate = r / 100.0
-            try:
-                if npv(rate) * npv(rate + 0.01) < 0:
-                    return brentq(npv, rate, rate + 0.01)
-            except Exception:
-                pass
-        return 0.0
+    dates = [c[0] for c in cashflows]
+    amounts = [c[1] for c in cashflows]
+    from modules.metrics import xirr as calc_xirr
+    return calc_xirr(dates, amounts)
 
 # ── Investment definitions ────────────────────────────────────────────────────
 

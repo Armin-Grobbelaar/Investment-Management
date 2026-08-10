@@ -1,3 +1,4 @@
+from datetime import date
 import pandas as pd
 from .database import get_db_connection, DEFAULT_DB, create_connection
 from .currency import CURRENCY_SYMBOLS, convert_investment_data_for_display, SUPPORTED_BASE_CURRENCIES, DEFAULT_BASE_CURRENCY
@@ -380,22 +381,28 @@ def get_investment_names_list(database_name: str = DEFAULT_DB) -> list:
 def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
                              base_currency: str = "ZAR") -> list[dict]:
     """
-    Build a net-worth time series that is consistent with the current snapshot.
+    Build a net-worth time series consistent with actual transaction history.
 
-    For every investment the value on a given date is:
-        investments.number_of_units_held * unit_prices.unit_price(on that date)
-    converted to the base currency using the exchange rate available ON that date.
+    For each investment on each price date, the value is:
+        cumulative_units_up_to_date * unit_price(on that date)
+    where cumulative_units_up_to_date is the running total of units bought
+    (from the transactions table) on or before that date.
 
-    This deliberately uses the holdings recorded on the investments table (the
-    authoritative snapshot) rather than the transactions table, so the last point
-    of the series always equals the displayed total net worth.
+    This accurately reflects what the portfolio was actually worth at each
+    point in time, including the effect of contributions over time.
+    The last point equals the displayed total net worth.
 
     Returns a list of {"date": "YYYY-MM-DD", "value": float} sorted ascending.
     """
     from .currency import CURRENCY_SYMBOLS
 
     with get_db_connection(database_name) as (conn, cursor):
-        # Investments + their per-date unit prices (skip zero-holding rows)
+        # Get all non-Forex investments with unit prices.
+        # Use the current number_of_units_held from the investments table
+        # (the authoritative snapshot) valued at each historical price.
+        # This shows what today's portfolio would have been worth at each
+        # historical price point, ensuring the last point equals the
+        # displayed total net worth.
         cursor.execute("""
             SELECT i.id, i.unit_currency, i.number_of_units_held,
                    up.unit_price_date, up.unit_price
@@ -407,7 +414,28 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
         """)
         rows = cursor.fetchall()
 
-        if not rows:
+        # Also get investments WITHOUT price history but with transactions,
+        # so they still contribute to the total net worth.
+        cursor.execute("""
+            WITH priced_invs AS (
+                SELECT DISTINCT investment_id FROM v_investment_prices WHERE unit_price > 0
+            )
+            SELECT
+                i.id,
+                i.unit_currency,
+                i.initial_investment_date,
+                i.unit_price,
+                i.number_of_units_held
+            FROM investments i
+            LEFT JOIN priced_invs p ON p.investment_id = i.id
+            WHERE i.number_of_units_held > 0
+              AND i.investment_type <> 'Forex'
+              AND p.investment_id IS NULL
+            ORDER BY i.id
+        """)
+        unpriced = cursor.fetchall()
+
+        if not rows and not unpriced:
             return []
 
         # Load every forex investment + its full price history once.
@@ -455,8 +483,10 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
             return 1.0 / rev
         return 1.0
 
+    # Build daily totals using current holdings valued at historical prices
     daily_totals: dict[date, float] = {}
-    for _inv_id, currency, units, price_date, price in rows:
+
+    for inv_id, currency, units, price_date, price in rows:
         currency_code = currency
         if isinstance(currency_code, str) and len(currency_code) == 1:
             currency_code = CURRENCY_SYMBOLS.get(currency_code, currency_code)
@@ -464,6 +494,26 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
         if currency_code != base_currency:
             value_local *= _rate(currency_code, price_date)
         daily_totals[price_date] = daily_totals.get(price_date, 0.0) + value_local
+
+    # Add investments without price history: they use their current value
+    # (number_of_units_held × unit_price) for all dates from their initial date.
+    for inv_id, currency, init_date, price, units_held in unpriced:
+        currency_code = currency
+        if isinstance(currency_code, str) and len(currency_code) == 1:
+            currency_code = CURRENCY_SYMBOLS.get(currency_code, currency_code)
+        if init_date is None or price is None or units_held is None:
+            continue
+        value_local = float(units_held) * float(price)
+        if currency_code != base_currency:
+            value_local *= _rate(currency_code, init_date)
+        # Add this value to all dates >= init_date
+        init_dt = init_date if isinstance(init_date, date) else init_date.date()
+        for d in list(daily_totals.keys()):
+            if d >= init_dt:
+                daily_totals[d] = daily_totals.get(d, 0.0) + value_local
+        # If no dates exist yet, create an initial entry
+        if init_dt not in daily_totals and not any(d >= init_dt for d in daily_totals.keys()):
+            daily_totals[init_dt] = daily_totals.get(init_dt, 0.0) + value_local
 
     return [
         {"date": d.isoformat(), "value": round(v, 2)}

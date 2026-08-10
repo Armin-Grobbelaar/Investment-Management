@@ -504,8 +504,8 @@ class InvestmentPDFReport:
         for temp_file in self.temp_chart_files:
             try:
                 os.remove(temp_file)
-            except:
-                pass
+            except Exception:
+                pass  # Ignore cleanup errors
         
         print(f"✓ Report generated: {output_file}")
         return output_file

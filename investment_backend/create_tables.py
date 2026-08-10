@@ -263,8 +263,8 @@ def create_tables(db_name):
             ('max_chart_period_days', '3650', 'Maximum days to show in historical charts (default 10 years)', 'display', true),
             ('cgt_inclusion_rate', '0.40', 'Capital Gains Tax inclusion rate for individuals (fraction)', 'tax', true),
             ('cgt_marginal_tax_rate', '0.45', 'Assumed marginal income tax rate for CGT calc (fraction)', 'tax', true),
-            ('cgt_annual_exclusion', '40000', 'Annual CGT exclusion for individuals (in base currency)', 'tax', true),
-            ('cgt_primary_residence_exclusion', '2000000', 'CGT exclusion for the sale of a primary residence (in base currency)', 'tax', true),
+            ('cgt_annual_exclusion', '50000', 'Annual CGT exclusion for individuals (in base currency) — updated 2 March 2026 per Budget 2026', 'tax', true),
+            ('cgt_primary_residence_exclusion', '3000000', 'CGT exclusion for the sale of a primary residence (in base currency) — updated 2 March 2026 per Budget 2026', 'tax', true),
             ('default_projection_years', '20', 'Default property projection horizon in years', 'property', true),
             ('monte_carlo_simulations', '1000', 'Default number of Monte Carlo simulations', 'property', true),
             ('default_bond_interest_rate', '11.75', 'Default property bond interest rate (percent)', 'property', true),
@@ -276,7 +276,6 @@ def create_tables(db_name):
             ('scheduler_daily_minute', '30', 'Minute for daily price fetch scheduler', 'automation', true),
             ('scheduler_factsheet_day', '20', 'Day of month for monthly factsheet download', 'automation', true),
             ('prediction_horizon_days', '30', 'Default prediction horizon in days', 'predictions', true),
-            -- Simulation / risk-model constants (previously hardcoded in the API layer)
             ('portfolio_risk_baseline', '1.0', 'Baseline risk score for the total portfolio', 'simulation', true),
             ('individual_risk_multiplier', '1.5', 'Risk score multiplier for individual investments vs portfolio', 'simulation', true),
             ('currency_risk_multiplier', '1.2', 'Risk score multiplier for currency-segregated views', 'simulation', true),
@@ -321,9 +320,18 @@ def create_tables(db_name):
             ('contribution_periods', '60', 'Number of periods used to estimate average monthly contributions', 'performance', true),
             ('dividend_periods', '60', 'Number of periods used to estimate average dividend yields', 'performance', true),
             ('area_chart_days', '30', 'Number of days shown on the dashboard area chart', 'display', true),
-            ('area_chart_top_n', '5', 'Number of top investments shown on the dashboard area chart', 'display', true)
-        ON CONFLICT (setting_key) DO NOTHING
+            ('area_chart_top_n', '5', 'Number of top investments shown on the dashboard area chart', 'display', true),
+            ('gzip_min_size', '1000', 'Minimum size in bytes for GZip compression', 'performance', true),
+            ('tf_api_timeout', '5', 'Timeout in seconds for TensorFlow health check', 'predictions', true),
+            ('tf_training_timeout', '600', 'Timeout in seconds for remote LSTM training', 'predictions', true),
+            ('xgboost_random_state', '42', 'Random state for XGBoost model', 'predictions', true),
+            ('gp_random_state', '42', 'Random state for GP Regressor', 'predictions', true),
+            ('synthetic_data_seed', '42', 'Seed for synthetic data generation', 'simulation', true),
+            ('monte_carlo_seed', '42', 'Seed for Monte Carlo', 'simulation', true),
+            ('transfer_duty_brackets', '[{"lower": 0, "upper": 1210000, "base": 0, "rate": 0.0}, {"lower": 1210000, "upper": 1663800, "base": 0, "rate": 0.03, "excess_from": 1210000}, {"lower": 1663800, "upper": 2329300, "base": 13614, "rate": 0.06, "excess_from": 1663800}, {"lower": 2329300, "upper": 2994800, "base": 53544, "rate": 0.08, "excess_from": 2329300}, {"lower": 2994800, "upper": 13310000, "base": 106784, "rate": 0.11, "excess_from": 2994800}, {"lower": 13310000, "upper": 999999999999, "base": 1241456, "rate": 0.13, "excess_from": 13310000}]', 'SA Transfer Duty brackets 2025/26 (JSON) — source: sars.gov.za/tax-rates/transfer-duty/', 'tax', true)
+        ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()
         """)
+
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS prediction_accuracy (

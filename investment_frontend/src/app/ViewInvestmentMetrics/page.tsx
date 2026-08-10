@@ -239,13 +239,8 @@ export default function EnhancedViewInvestmentMetrics() {
     const currentDimension = DIMENSIONS[dimensionType];
     const dimensionOptions = currentDimension.arrayName ? (dimensionData?.[currentDimension.arrayName] || []) : [];
 
-    const thresholds = metricsData?.thresholds || {
-        excellent_sharpe: 1.2,
-        good_sharpe: 0.8,
-        good_volatility: 0.15,
-        excellent_cagr: 0.15,
-        good_cagr: 0.08
-    };
+    // Thresholds are now dynamically fetched from the backend via metricsData
+    const thresholds = metricsData?.thresholds;
 
     const fmtCurrency = (val: number) => val == null ? 'N/A' : new Intl.NumberFormat('en-ZA', { style: 'currency', currency: metricsData?.base_currency || 'ZAR', maximumFractionDigits: 0 }).format(val);
     const fmtPct = (val: number) => val == null ? 'N/A' : `${Number(val).toFixed(2)}%`;

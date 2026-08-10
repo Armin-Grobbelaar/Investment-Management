@@ -3,7 +3,17 @@ Tests for property_calculator.py financial calculations.
 
 Covers the amortisation (PMT / outstanding balance), SA transfer duty
 brackets, CGT on disposal, and the projection IRR/rethIRR logic.
-Bracket values cross-checked against SARS rates (unchanged 1 April 2026).
+
+Transfer duty bracket values cross-checked against SARS rates:
+- 2024/25: sars.gov.za/tax-rates/transfer-duty/ (historical)
+- 2025/26: effective 1 April 2025; unchanged for 2026/27 per SARS
+  "2027 (With effect from 1 April 2026) – No changes from last year."
+  Source: https://www.sars.gov.za/tax-rates/transfer-duty/
+
+CGT exclusions updated to Budget 2026 values (effective 2 March 2026):
+- Annual exclusion: R50 000 (was R40 000)
+- Primary residence: R3 000 000 (was R2 000 000)
+  Source: https://www.sars.gov.za/tax-rates/income-tax/capital-gains-tax-cgt/
 """
 
 import numpy as np
@@ -58,33 +68,42 @@ class TestCalculateRemainingBond:
 
 
 class TestTransferDuty:
-    """SA transfer duty brackets (2024/25..2026/27 — unchanged since 1 Apr 2025)."""
+    """SA transfer duty brackets 2025/26 (effective 1 April 2025).
+
+    SARS source: https://www.sars.gov.za/tax-rates/transfer-duty/
+    Unchanged for 2026/27 per SARS ("2027 – No changes from last year").
+    """
 
     def test_zero_duty_below_threshold(self):
+        # R1 000 000 and R1 210 000 both fall in the 0% band (up to R1 210 000)
         assert calculate_sa_transfer_duty(1_000_000) == 0.0
-        assert calculate_sa_transfer_duty(1_100_000) == 0.0
+        assert calculate_sa_transfer_duty(1_210_000) == 0.0
 
     def test_three_percent_band(self):
-        # 1.3m: 0 + 3% of (1.3m - 1.1m) = 6,000
-        assert calculate_sa_transfer_duty(1_300_000) == pytest.approx(6000.0)
+        # R1 450 000: 0 + 3% of (1 450 000 − 1 210 000) = 7 200
+        assert calculate_sa_transfer_duty(1_450_000) == pytest.approx(7_200.0)
 
     def test_six_percent_band_base(self):
-        # 1.7m: 12,375 + 6% of (1.7m - 1,512,500) = 12,375 + 11,250 = 23,625
-        assert calculate_sa_transfer_duty(1_700_000) == pytest.approx(23625.0)
+        # R2 000 000: 13 614 + 6% of (2 000 000 − 1 663 800) = 13 614 + 20 172 = 33 786
+        assert calculate_sa_transfer_duty(2_000_000) == pytest.approx(33_786.0)
 
     def test_eight_percent_band(self):
-        # 2.4m: 48,675 + 8% of (2.4m - 2,117,500) = 48,675 + 22,600 = 71,275
-        assert calculate_sa_transfer_duty(2_400_000) == pytest.approx(71275.0)
+        # R2 400 000: 53 544 + 8% of (2 400 000 − 2 329 300) = 53 544 + 5 656 = 59 200
+        assert calculate_sa_transfer_duty(2_400_000) == pytest.approx(59_200.0)
+
+    def test_eleven_percent_band(self):
+        # R8 000 000: 106 784 + 11% of (8 000 000 − 2 994 800) = 106 784 + 550 572 = 657 356
+        assert calculate_sa_transfer_duty(8_000_000) == pytest.approx(657_356.0)
 
     def test_top_band(self):
-        # 15m: 1,128,600 + 13% of (15m - 12.1m) = 1,128,600 + 377,000 = 1,505,600
-        assert calculate_sa_transfer_duty(15_000_000) == pytest.approx(1505600.0)
+        # R15 000 000: 1 241 456 + 13% of (15 000 000 − 13 310 000) = 1 241 456 + 219 700 = 1 461 156
+        assert calculate_sa_transfer_duty(15_000_000) == pytest.approx(1_461_156.0)
 
     def test_exact_boundary_uses_next_band(self):
-        # Price exactly at 1,100,000 is the zero band upper bound (inclusive)
-        assert calculate_sa_transfer_duty(1_100_000) == 0.0
-        # Just above goes into the 3% band
-        assert calculate_sa_transfer_duty(1_100_001) == pytest.approx(0.03)
+        # Price exactly at R1 210 000 is the zero-band upper bound (inclusive)
+        assert calculate_sa_transfer_duty(1_210_000) == 0.0
+        # Just above goes into the 3% band: 3% of R1 ≈ R0.03
+        assert calculate_sa_transfer_duty(1_210_001) == pytest.approx(0.03)
 
 
 class TestCgt:
@@ -188,12 +207,12 @@ class TestRunPropertyProjection:
         assert res["first_year_gross_yield"] == pytest.approx(12.0)  # 120k / 1m
 
     def test_primary_residence_reduces_cgt_in_projection(self):
-        """Tickbox flows through: the R2m primary-residence exclusion must cut
-        the year-20 CGT by inclusion_rate * marginal_rate * 2m."""
+        """Tickbox flows through: the R3M primary-residence exclusion (Budget
+        2026) must cut the year-20 CGT by inclusion_rate * marginal_rate * 3m."""
         normal = run_property_projection(**self._full_inputs())
         primary = run_property_projection(**self._full_inputs(is_primary_residence=True))
         assert normal["cgt_20yr"] > 0
         assert primary["cgt_20yr"] < normal["cgt_20yr"]
-        assert normal["cgt_20yr"] - primary["cgt_20yr"] == pytest.approx(0.40 * 0.45 * 2_000_000, abs=1.0)
+        assert normal["cgt_20yr"] - primary["cgt_20yr"] == pytest.approx(0.40 * 0.45 * 3_000_000, abs=1.0)
         # Lower CGT -> higher net sale proceeds -> higher IRR
         assert primary["irr_20yr"] > normal["irr_20yr"]

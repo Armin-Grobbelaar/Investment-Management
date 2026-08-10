@@ -1,0 +1,18 @@
+- [x] Read investment_backend_fastapi.py
+- [x] Read modules/metrics.py
+- [x] Read modules/predictions.py
+- [x] Read modules/property_calculator.py
+- [x] Read modules/portfolio.py
+- [x] Read modules/api.py
+- [x] Read modules/portfolio_metrics.py
+- [x] Read modules/monte_carlo.py
+- [ ] Read modules/currency.py
+- [ ] Read modules/comparison.py
+- [ ] Read enhanced_pdf_report.py
+- [ ] Read create_tables.py
+- [ ] Read import_excel.py and import_npv_excel.py
+- [ ] Read investment_stock_predictions.py
+- [ ] Read maintenance.py and modules/maintenance_utils.py
+- [ ] Read modules/startup_utils.py and startup.py
+- [ ] Read backfill_prices.py
+- [ ] Compile and report findings
