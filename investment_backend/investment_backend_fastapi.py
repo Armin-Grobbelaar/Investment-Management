@@ -2045,6 +2045,15 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
             
             conclusion = f"Portfolio performance: Total value {base_currency} {total_current_value:,.2f}, total contributions {base_currency} {total_contributions:,.2f}, net growth {base_currency} {total_return_amount:,.2f} (CAGR: {latest_cagr*100:.2f}%, IRR: {latest_irr*100:.2f}%)."
             
+            from modules.database import get_config_value
+            thresholds = {
+                "excellent_sharpe": float(get_config_value("excellent_sharpe_ratio", 1.2, database_name)),
+                "good_sharpe": float(get_config_value("good_sharpe_ratio", 0.8, database_name)),
+                "good_volatility": float(get_config_value("good_volatility_threshold", 0.15, database_name)),
+                "cagr_excellent": float(get_config_value("cagr_excellent_threshold", 0.15, database_name)),
+                "cagr_good": float(get_config_value("cagr_good_threshold", 0.08, database_name)),
+            }
+
             return Response(
                 json.dumps({
                     "portfolio_performance_return": portfolio_performance_return,
@@ -2063,6 +2072,7 @@ async def get_investment_metrics(database_name: str, base_currency: str = "ZAR",
                     "irr_trend": irr_trend,
                     "benchmarks": {"portfolio": [], "benchmark": []},
                     "key_metrics": key_metrics,
+                    "thresholds": thresholds,
                     "conclusion": conclusion,
                     "filter_type": filter,
                     "generated_at": datetime.now().isoformat(),

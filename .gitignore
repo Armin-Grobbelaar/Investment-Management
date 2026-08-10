@@ -25,3 +25,4 @@ investment_frontend/*.pid
 .DS_Store
 .vscode/
 graphify-out/
+db_backups/

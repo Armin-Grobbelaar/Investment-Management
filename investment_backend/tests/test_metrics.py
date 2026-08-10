@@ -144,7 +144,6 @@ class TestInvestmentMetrics:
         # Mock investment details
         mock_cursor.fetchone.side_effect = [
             ('TEST', 'ZAR', 10.0, 100.0), # ticker, currency, units_held, unit_price
-            (date(2023, 12, 31),),       # latest price date
             (date(2023, 1, 1), 100.0, 10.0) # initial_investment_date, initial_unit_price, number_of_units_held
         ]
 
