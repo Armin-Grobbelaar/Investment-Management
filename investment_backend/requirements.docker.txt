@@ -30,3 +30,5 @@ numpy-financial
 pytz
 pillow
 playwright
+beautifulsoup4
+lxml

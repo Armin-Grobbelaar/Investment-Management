@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { options } from '../auth/[...nextauth]/options';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:3337';
 
@@ -44,14 +46,37 @@ export async function PATCH(
 
 async function proxyRequest(req: NextRequest, path: string[]) {
   const pathStr = path.join('/');
+  
+  // Public paths bypass authentication checks
+  const isPublicPath = 
+    pathStr === 'verify_user' || 
+    pathStr === 'add_user' || 
+    pathStr === 'health' || 
+    pathStr === 'currencies' || 
+    pathStr === 'api/currencies';
+
+  const headers: Record<string, string> = {};
+
+  if (!isPublicPath) {
+    const session = await getServerSession(options);
+    const accessToken = (session as any)?.access_token;
+
+    if (!session) {
+      return NextResponse.json(
+        { detail: 'Unauthorized: No active session found' },
+        { status: 401 }
+      );
+    }
+
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+  }
+
   const url = new URL(req.url);
-  const queryString = url.search;
-  const backendUrl = `${BACKEND_URL}/${pathStr}${queryString}`;
+  const backendUrl = `${BACKEND_URL}/${pathStr}${url.search}`;
 
   try {
-    const headers: Record<string, string> = {};
-
-    // Copy content-type from original request
     const originalContentType = req.headers.get('content-type');
     if (originalContentType) {
       headers['Content-Type'] = originalContentType;
@@ -68,14 +93,39 @@ async function proxyRequest(req: NextRequest, path: string[]) {
       body,
     });
 
-    const responseText = await response.text();
+    const contentType = response.headers.get('content-type') || '';
 
-    // Try to parse as JSON for forwarding
+    // Binary responses (PDFs, images, etc.) — stream through directly
+    if (
+      contentType.includes('application/pdf') ||
+      contentType.includes('application/octet-stream') ||
+      contentType.includes('image/')
+    ) {
+      const buffer = await response.arrayBuffer();
+      const responseHeaders: Record<string, string> = {
+        'Content-Type': contentType,
+        'Content-Length': buffer.byteLength.toString(),
+      };
+      const disposition = response.headers.get('content-disposition');
+      if (disposition) {
+        responseHeaders['Content-Disposition'] = disposition;
+      }
+      return new Response(buffer, {
+        status: response.status,
+        headers: responseHeaders,
+      });
+    }
+
+    // JSON / text responses
+    const responseText = await response.text();
     let responseBody: any = responseText;
     try {
       responseBody = JSON.parse(responseText);
     } catch {
-      // Not JSON - pass through as text
+      return new Response(responseText, {
+        status: response.status,
+        headers: { 'Content-Type': contentType || 'text/plain' },
+      });
     }
 
     return NextResponse.json(responseBody, {

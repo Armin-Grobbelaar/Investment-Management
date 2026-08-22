@@ -1039,8 +1039,8 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> di
 
         def _convert(amount, currency):
             if currency and currency.upper() != base_currency.upper():
-                rate = get_exchange_rate(currency, base_currency, database_name=database_name)
-                return amount * rate
+                rate, _ = get_exchange_rate(currency, base_currency, database_name=database_name)
+                return float(amount) * float(rate)
             return float(amount)
 
         for row in contributions:

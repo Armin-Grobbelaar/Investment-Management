@@ -17,23 +17,33 @@ from modules.predictions import (
 from modules.property_calculator import (
     run_property_projection, run_sensitivity_analysis, run_property_monte_carlo,
     calculate_pmt, calculate_sa_transfer_duty,
-    DEFAULT_BOND_INTEREST_RATE, DEFAULT_RENTAL_GROWTH_RATE, DEFAULT_VACANCY_RATE,
-    DEFAULT_PROPERTY_GROWTH_RATE, DEFAULT_INFLATION_RATE
 )
+
+# Define constants locally or fetch from config
+DEFAULT_BOND_INTEREST_RATE = 11.75
+DEFAULT_RENTAL_GROWTH_RATE = 5.0
+DEFAULT_VACANCY_RATE = 5.0
+DEFAULT_PROPERTY_GROWTH_RATE = 7.0
+DEFAULT_INFLATION_RATE = 5.0
+
 from modules.property_scraper import scrape_property_url
-from modules.property_reporting import generate_property_pdf_report
+from modules.retirement import calculate_retirement_projection
 from modules.factsheet_downloader import (
     download_factsheet, get_factsheets_for_investment, run_monthly_factsheet_downloader,
-    get_factsheet_path
+    get_factsheet_path, download_factsheet_from_url, preview_factsheet_url
 )
 from modules.price_scraper import fetch_prices_now, get_backfill_status
-from modules.currency import currency_display_symbol
+from modules.currency import (
+    currency_display_symbol, get_available_base_currencies, get_exchange_rate,
+    BASE_CURRENCY_CODE
+)
 from modules.database import get_config_value, get_all_config, invalidate_config_cache
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi import FastAPI, Response, BackgroundTasks, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta, date
 import json
 import pandas as pd
@@ -220,25 +230,91 @@ def _set_cache_data(cache_key: str, data: dict) -> None:
 
 class AddUserRequest(BaseModel):
     username: str
-    user_surname: str
+    email: str
+    password: str
+    full_name: str = None
 
 
-class AddInvestmentRequest(BaseModel):
-    database_name: str
-    institution_name: str
-    initial_investment_date: str
-    investment_type: str
-    investment_name: str
-    investment_ticker: str
-    unit_currency: str
-    initial_unit_price: float
-    unit_price: float
-    number_of_units_held: float
-    total_dividends_received: float
-    total_tax_paid: float
-    total_fees_paid: float
-    investment_fee: float
-    investment_status: str
+class RetirementProjectionRequest(BaseModel):
+    current_ra_value: float
+    split_living_annuity: float
+    split_life_annuity: float
+    assumed_growth: float
+    drawdown_rate: float
+    inflation: float
+    escalation: float
+    monthly_contribution: float
+    years_to_retirement: int
+    ra_irr_historical: float
+    life_annuity_rate: float = 0.055
+    monthly_expenses: float = 0.0
+    contribution_annual_increase: float = 0.0
+    increased_monthly_contribution: Optional[float] = None
+    database_name: str = "Investments"
+
+@investment_api.post("/retirement_projection")
+async def fastapi_calculate_retirement_projection(request: RetirementProjectionRequest):
+    return calculate_retirement_projection(**request.dict())
+
+@investment_api.get("/retirement/auto_inputs")
+async def get_retirement_auto_inputs(database_name: str = "Investments", base_currency: str = "ZAR"):
+    """Return auto-populated inputs for the retirement calculator from DB data."""
+    try:
+        result = {}
+        
+        # 1. Current total RA/investment value
+        try:
+            total_value = get_portfolio_total_value(database_name, base_currency)
+            result["current_portfolio_value"] = float(total_value) if total_value else 0.0
+        except Exception:
+            result["current_portfolio_value"] = 0.0
+
+        # 2. Historical IRR from portfolio
+        try:
+            from modules.metrics import calculate_portfolio_irr
+            irr_data = calculate_portfolio_irr(database_name, base_currency)
+            if irr_data and "whole_portfolio" in irr_data:
+                irr_val = irr_data["whole_portfolio"].get("irr")
+                if irr_val is not None:
+                    result["ra_irr_historical"] = round(float(irr_val), 4)
+                else:
+                    result["ra_irr_historical"] = FALLBACK_PORTFOLIO_IRR / 100
+            else:
+                result["ra_irr_historical"] = FALLBACK_PORTFOLIO_IRR / 100
+        except Exception:
+            result["ra_irr_historical"] = FALLBACK_PORTFOLIO_IRR / 100
+
+        # 3. Average monthly contribution (last 12 months)
+        try:
+            with get_db_connection(database_name) as (conn, cursor):
+                cursor.execute("""
+                    SELECT COALESCE(SUM(ABS(amount_contributed)), 0) / 12.0
+                    FROM investment_data
+                    WHERE data_date >= CURRENT_DATE - INTERVAL '12 months'
+                      AND amount_contributed > 0
+                """)
+                row = cursor.fetchone()
+                result["avg_monthly_contribution"] = round(float(row[0]), 2) if row and row[0] else 0.0
+        except Exception:
+            result["avg_monthly_contribution"] = 0.0
+
+        # 4. Life annuity rate from config or default
+        try:
+            from modules.retirement import get_life_annuity_rate
+            result["life_annuity_rate"] = get_life_annuity_rate(database_name)
+        except Exception:
+            result["life_annuity_rate"] = 0.055
+
+        # 5. Default inflation rate from config
+        try:
+            inflation_val = get_config_value("default_inflation_rate", database_name=database_name)
+            result["default_inflation"] = float(inflation_val) if inflation_val else 0.06
+        except Exception:
+            result["default_inflation"] = 0.06
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch auto inputs: {str(e)}")
 
 cors_env = os.environ.get("CORS_ALLOWED_ORIGINS")
 if cors_env:
@@ -433,11 +509,21 @@ def fastapi_get_investment_summary(database_name):
 
     return Response(investment_summary.to_json(orient="records"), media_type="application/json")
 
+@investment_api.post("/verify_user")
+def fastapi_verify_user(credentials: dict):
+    from modules.database import verify_user
+    username = credentials.get("username")
+    password = credentials.get("password")
+    user = verify_user(username, password)
+    if user:
+        return user
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
 @investment_api.post("/add_user")
 def fastapi_add_user(user_data: AddUserRequest):
-    # Call your add_user function with the data from the request
-    add_user(user_data.username, user_data.user_surname)
-    return {"message": "User successfully added"}
+    from modules.database import add_user
+    res = add_user(user_data.username, user_data.email, user_data.password, user_data.full_name)
+    return res
 
 @investment_api.get("/all_investment_values/{database_name}")
 def fastapi_get_all_investment_values(database_name: str):
@@ -452,6 +538,22 @@ async def fastapi_get_investment_values(database_name: str, investment_name: str
         investment_values = get_all_investment_values(database_name)
     investment_values_filttered = investment_values[investment_values["investment_name"] == investment_name][column_name]
     return Response(investment_values_filttered.to_json(orient="records"), media_type="application/json")
+
+class AddInvestmentRequest(BaseModel):
+    institution_name: str
+    initial_investment_date: str
+    investment_type: str
+    investment_name: str
+    investment_ticker: Optional[str] = None
+    unit_currency: str = "ZAR"
+    initial_unit_price: float = 0.0
+    unit_price: float = 0.0
+    number_of_units_held: float = 0.0
+    total_dividends_received: float = 0.0
+    total_tax_paid: float = 0.0
+    total_fees_paid: float = 0.0
+    investment_fee: float = 0.0
+    investment_status: str = "Active"
 
 @investment_api.post("/add_investment/{database_name}")
 async def fastapi_add_investment(database_name: str, investment_data: AddInvestmentRequest, background_tasks: BackgroundTasks = None):
@@ -793,6 +895,24 @@ async def refresh_data(database_name: str, background_tasks: BackgroundTasks):
         "timestamp": datetime.now().isoformat()
     }
 
+@investment_api.get("/currencies")
+async def get_currencies():
+    """Get list of supported base currencies."""
+    try:
+        return get_available_base_currencies()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch currencies: {str(e)}")
+
+
+@investment_api.get("/api/currencies")
+async def get_currencies():
+    """Get list of supported base currencies."""
+    try:
+        return {"currencies": get_available_base_currencies()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch currencies: {str(e)}")
+
+
 @investment_api.get("/dashboard_charts/{database_name}")
 async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                               filter_type: str = None, filter_value: str = None):
@@ -854,13 +974,17 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
         full_summary_df = raw_summary_df.copy()
 
         # Unfiltered breakdown groups, used for the sidebar menu and for the
-        # allocation bar charts even when a filter is active (those groups are
-        # only computed for non-filtered dimensions below).
-        full_type_groups = full_summary_df.groupby("investment_type")["investment_value"].sum().reset_index()
-        full_currency_groups = full_summary_df.groupby("unit_currency")["investment_value"].sum().reset_index()
-        full_institution_groups = full_summary_df.groupby("institution_name")["investment_value"].sum().reset_index().sort_values(
-            "investment_value", ascending=False
-        )
+        # allocation bar charts even when a filter is active
+        if not full_summary_df.empty:
+            full_type_groups = full_summary_df.groupby("investment_type")["investment_value"].sum().reset_index()
+            full_currency_groups = full_summary_df.groupby("unit_currency")["investment_value"].sum().reset_index()
+            full_institution_groups = full_summary_df.groupby("institution_name")["investment_value"].sum().reset_index().sort_values(
+                "investment_value", ascending=False
+            )
+        else:
+            full_type_groups = pd.DataFrame(columns=["investment_type", "investment_value"])
+            full_currency_groups = pd.DataFrame(columns=["unit_currency", "investment_value"])
+            full_institution_groups = pd.DataFrame(columns=["institution_name", "investment_value"])
 
         # Get currency-converted summary data (for most charts/tables)
         summary_df = get_investment_summary_display(
@@ -881,6 +1005,10 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 timeseries_df = timeseries_df.dropna(subset=["unit_price_date"])
             if "investment_value" in timeseries_df.columns:
                 timeseries_df["investment_value"] = pd.to_numeric(timeseries_df["investment_value"], errors='coerce').fillna(0.0)
+        else:
+            logger.info("Timeseries data is empty.")
+
+
 
         # Apply filtering if filter parameters are provided
         # IMPORTANT: Filter summary data but use same investment names for timeseries
@@ -959,8 +1087,17 @@ async def get_dashboard_charts(database_name: str, base_currency: str = "ZAR",
                 "type_table": [],
                 "currency_table": [],
                 "institution_table": [],
+                "summary_table": [],
+                "timeseries": [],
+                "timeseries_date_range": {"min": None, "max": None},
+                "bar_charts": [],
+                "area_charts": [],
+                "key_metrics": [],
+                "menu_items": [],
                 "base_currency": base_currency,
-                "timestamp": datetime.now().isoformat()
+                "total_portfolio_value": 0.0,
+                "timestamp": datetime.now().isoformat(),
+                "cache_expires_in": CACHE_TIMEOUT
             }
             _set_cache_data(cache_key, empty_response)
             return Response(
@@ -1541,9 +1678,30 @@ async def factsheet_get(database_name: str = "Investments", investment_id: int =
 async def factsheet_serve(database_name: str = "Investments", investment_id: int = None, year: int = None, month: int = None):
     """Serve a factsheet PDF file."""
     try:
-        file_path = get_factsheet_path(investment_id, year, month, "MDD")
+        file_path = None
+        try:
+            with get_db_connection(database_name) as (conn, cursor):
+                cursor.execute("""
+                    SELECT file_path FROM factsheets
+                    WHERE investment_id = %s AND factsheet_year = %s AND factsheet_month = %s
+                    ORDER BY downloaded_at DESC LIMIT 1
+                """, (investment_id, year, month))
+                row = cursor.fetchone()
+                if row and row[0] and os.path.exists(row[0]):
+                    file_path = row[0]
+        except Exception:
+            pass
+
+        if not file_path or not os.path.exists(file_path):
+            file_path = get_factsheet_path(investment_id, year, month, "MDD")
+            
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Factsheet not found")
+            alt_path = get_factsheet_path(investment_id, year, month, "Factsheet")
+            if os.path.exists(alt_path):
+                file_path = alt_path
+            else:
+                raise HTTPException(status_code=404, detail="Factsheet file not found on server")
+
         return FileResponse(file_path, media_type="application/pdf", filename=os.path.basename(file_path))
     except HTTPException:
         raise
@@ -1556,13 +1714,17 @@ async def factsheet_download(database_name: str = "Investments", investment_id: 
     """Download the latest factsheet for an investment."""
     try:
         with get_db_connection(database_name) as (conn, cursor):
-            cursor.execute("SELECT investment_name, institution_name FROM investments WHERE id = %s", (investment_id,))
+            cursor.execute("SELECT investment_name, institution_name, investment_ticker FROM investments WHERE id = %s", (investment_id,))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Investment not found")
-            inv_name, inst_name = row
-        res = download_factsheet(investment_id, inv_name, inst_name, database_name)
-        return {"details": res}
+            inv_name, inst_name, inv_ticker = row
+        res = download_factsheet(investment_id, inv_name, inst_name, database_name, investment_ticker=inv_ticker)
+        return {
+            "details": res,
+            "investment_name": inv_name,
+            "institution_name": inst_name,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download factsheet: {str(e)}")
 
@@ -1579,6 +1741,54 @@ async def factsheet_download_all(database_name: str = "Investments", background_
             return {"message": "Bulk download complete", "result": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to trigger bulk download: {str(e)}")
+
+
+class CustomFactsheetDownloadRequest(BaseModel):
+    investment_id: int
+    custom_url: str
+    year: Optional[int] = None
+    month: Optional[int] = None
+    factsheet_type: str = "MDD"
+    database_name: str = "Investments"
+
+
+@investment_api.post("/factsheets/Investments/download_custom_url")
+async def factsheet_download_custom_url(request: CustomFactsheetDownloadRequest):
+    """Download a factsheet from a user-specified custom URL."""
+    try:
+        res = download_factsheet_from_url(
+            investment_id=request.investment_id,
+            custom_url=request.custom_url,
+            database_name=request.database_name,
+            year=request.year,
+            month=request.month,
+            factsheet_type=request.factsheet_type,
+        )
+        return {"details": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed custom URL download: {str(e)}")
+
+
+@investment_api.get("/factsheets/Investments/preview_url/{investment_id}")
+async def factsheet_preview_url(investment_id: int, database_name: str = "Investments"):
+    """Preview the detected factsheet URL before downloading."""
+    try:
+        with get_db_connection(database_name) as (conn, cursor):
+            cursor.execute(
+                "SELECT investment_name, institution_name, investment_ticker FROM investments WHERE id = %s",
+                (investment_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Investment not found")
+            inv_name, inst_name, inv_ticker = row
+        res = preview_factsheet_url(inv_name, inst_name, inv_ticker, database_name)
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to preview URL: {str(e)}")
+
 
 
 @investment_api.get("/investment_metrics_by_name/{database_name}/{investment_name}")
@@ -1638,6 +1848,126 @@ async def run_monte_carlo(request: Request, database_name: str = "Investments"):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Monte Carlo failed: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Asset Manager URL Patterns Management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@investment_api.get("/asset_manager_patterns")
+async def get_asset_manager_patterns(database_name: str = "Investments"):
+    """Get all configured asset manager URL patterns."""
+    try:
+        from modules.database import get_asset_manager_url_patterns
+        patterns = get_asset_manager_url_patterns(database_name)
+        return {"patterns": patterns}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch patterns: {str(e)}")
+
+
+@investment_api.post("/asset_manager_patterns")
+async def add_asset_manager_pattern(request: Request, database_name: str = "Investments"):
+    """Add a new asset manager URL pattern."""
+    try:
+        body = await request.json()
+        manager_name = body.get("manager_name", "").strip()
+        factsheet_type = body.get("factsheet_type", "MDD").strip()
+        url_pattern = body.get("url_pattern", "").strip()
+        pattern_priority = int(body.get("pattern_priority", 1))
+        
+        if not manager_name or not url_pattern:
+            raise HTTPException(status_code=400, detail="manager_name and url_pattern are required")
+        
+        manager_norm = manager_name.lower().strip()
+        
+        with get_db_connection(database_name) as (conn, cursor):
+            cursor.execute("""
+                INSERT INTO asset_manager_url_patterns 
+                (manager_name, manager_name_normalized, factsheet_type, url_pattern, pattern_priority)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT ON CONSTRAINT asset_manager_url_patterns_manager_name_normalized_factsheet_type_url_p_key
+                DO UPDATE SET url_pattern = EXCLUDED.url_pattern, 
+                              pattern_priority = EXCLUDED.pattern_priority,
+                              is_active = true,
+                              updated_at = CURRENT_TIMESTAMP
+            """, (manager_name, manager_norm, factsheet_type, url_pattern, pattern_priority))
+            conn.commit()
+        
+        from modules.database import invalidate_asset_manager_patterns_cache
+        invalidate_asset_manager_patterns_cache(database_name)
+        
+        return {"message": f"Pattern added for {manager_name}", "manager_name": manager_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add pattern: {str(e)}")
+
+
+@investment_api.delete("/asset_manager_patterns/{pattern_id}")
+async def delete_asset_manager_pattern(pattern_id: int, database_name: str = "Investments"):
+    """Delete (deactivate) an asset manager URL pattern."""
+    try:
+        with get_db_connection(database_name) as (conn, cursor):
+            cursor.execute(
+                "UPDATE asset_manager_url_patterns SET is_active = false WHERE id = %s",
+                (pattern_id,)
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Pattern not found")
+            conn.commit()
+        
+        from modules.database import invalidate_asset_manager_patterns_cache
+        invalidate_asset_manager_patterns_cache(database_name)
+        
+        return {"message": "Pattern deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete pattern: {str(e)}")
+
+
+@investment_api.post("/asset_manager_patterns/test")
+async def test_asset_manager_pattern(request: Request, database_name: str = "Investments"):
+    """Test if a URL pattern resolves to a valid PDF for given fund details."""
+    try:
+        body = await request.json()
+        institution_name = body.get("institution_name", "").strip()
+        investment_name = body.get("investment_name", "").strip()
+        investment_ticker = body.get("investment_ticker", "").strip()
+        factsheet_type = body.get("factsheet_type", "MDD").strip()
+        url_pattern = body.get("url_pattern", "").strip()
+        
+        if not institution_name or not investment_name:
+            raise HTTPException(status_code=400, detail="institution_name and investment_name are required")
+        
+        from modules.factsheet_downloader import _slugify
+        slug = _slugify(investment_name)
+        ticker = investment_ticker or slug
+        
+        test_url = url_pattern.format(fund_slug=slug, ticker=ticker, fund_code=ticker)
+        
+        import requests
+        try:
+            response = requests.head(test_url, timeout=10, allow_redirects=True)
+            if response.status_code != 200:
+                response = requests.get(test_url, timeout=10, stream=True, allow_redirects=True)
+            valid = response.status_code == 200
+            return {
+                "test_url": test_url,
+                "status_code": response.status_code,
+                "valid": valid
+            }
+        except requests.RequestException as e:
+            return {
+                "test_url": test_url,
+                "status_code": None,
+                "valid": False,
+                "error": str(e)
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pattern test failed: {str(e)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

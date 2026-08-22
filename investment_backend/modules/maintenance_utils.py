@@ -14,10 +14,42 @@ from .portfolio import update_portfolio
 from .predictions import cleanup_old_predictions
 
 
+from .currency import BASE_CURRENCY_CODE, resolve_currency_code, sync_exchange_rates_for_pair
+
+
 def log(message, level="INFO"):
     """Log a message with timestamp."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] [{level}] {message}")
+
+
+def sync_all_exchange_rates(database_name=DEFAULT_DB, period="5d"):
+    """
+    Sync exchange rates for all foreign currencies present in the portfolio.
+    Called during routine maintenance.
+    """
+    log("Syncing FX rates for foreign currencies in portfolio...")
+    try:
+        with get_db_connection(database_name) as (conn, cursor):
+            cursor.execute("""
+                SELECT DISTINCT unit_currency FROM investments
+                WHERE investment_ticker != 'PORTFOLIO'
+                  AND investment_type != 'Forex'
+            """)
+            currencies = [resolve_currency_code(r[0]) for r in cursor.fetchall() if r[0]]
+
+        synced_count = 0
+        for curr in currencies:
+            if curr != BASE_CURRENCY_CODE:
+                log(f"  Syncing FX rates for {curr}/{BASE_CURRENCY_CODE}...")
+                n = sync_exchange_rates_for_pair(curr, BASE_CURRENCY_CODE, database_name, period=period)
+                synced_count += n
+
+        log(f"FX rate sync complete: {synced_count} rates updated/inserted")
+        return True
+    except Exception as e:
+        log(f"Failed to sync FX rates: {e}", "ERROR")
+        return False
 
 
 def update_unit_prices_from_yfinance(database_name=DEFAULT_DB):

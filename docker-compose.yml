@@ -6,29 +6,23 @@ services:
     image: armingrobbelaar/investment_app:latest
     container_name: investment_app
     restart: unless-stopped
-    # Use host networking to easily access existing DBs on 5432/5433 and the
-    # TensorFlow prediction API published on host port 8869.
-    network_mode: host
+    ports:
+      - "3037:3037"
+      - "3337:3337"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - tensorflow-api
     environment:
-      # Point to your existing databases on the host
-      POSTGRES_HOST: localhost
+      POSTGRES_HOST: host.docker.internal
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: changeme
-      INVESTMENTS_DB: Investments
-      USERS_DB: Users
-      # TensorFlow prediction API (dedicated container, see tensorflow-api
-      # below). Used by the LSTM and hybrid ARIMA-LSTM prediction models.
-      TENSORFLOW_API_URL: http://localhost:8869
-      # Legacy remote TF server URL — kept for compatibility (health check only).
+      INVESTMENTS_DB: investments_app
+      TENSORFLOW_API_URL: http://tensorflow-api:8000
       TENSORFLOW_SERVER_URL: http://localhost:8868
-      # Frontend environment
       NODE_ENV: production
       PORT: 3037
-      # NextAuth credentials (read from the gitignored root .env file).
-      # The old hardcoded Dave/nextauth credentials were removed for security.
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}

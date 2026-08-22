@@ -69,7 +69,9 @@ def _set_cache_data(cache_key: str, data: dict) -> None:
 
 class AddUserRequest(BaseModel):
     username: str
-    user_surname: str
+    email: str
+    password: str
+    full_name: str = None
 
 class AddInvestmentRequest(BaseModel):
     institution_name: str
@@ -265,7 +267,8 @@ def get_investment_summary_response(database_name):
 
 def add_user_api(user_data: AddUserRequest):
     """Add a user via API."""
-    add_user_db(user_data.username, user_data.user_surname)
+    from .database import add_user
+    add_user(user_data.username, user_data.email, user_data.password, user_data.full_name)
     return {"message": "User successfully added"}
 
 def get_all_investment_values_response(database_name: str):
@@ -603,7 +606,7 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
     from .currency import resolve_currency_code
     base_currency = resolve_currency_code(base_currency or "")
    
-    cache_key = f"charts:{database_name}:{base_currency}"
+    cache_key = f"charts:{database_name}:{base_currency}:{filter_type or ''}:{filter_value or ''}"
 
     # Check cache first
     cached_data = _get_cached_data(cache_key)
@@ -707,8 +710,17 @@ def get_dashboard_charts_api(database_name: str, base_currency: str = "ZAR",
                 "type_table": [],
                 "currency_table": [],
                 "institution_table": [],
+                "summary_table": [],
+                "timeseries": [],
+                "timeseries_date_range": {"min": None, "max": None},
+                "bar_charts": [],
+                "area_charts": [],
+                "key_metrics": [],
+                "menu_items": [],
                 "base_currency": base_currency,
-                "timestamp": datetime.now().isoformat()
+                "total_portfolio_value": 0.0,
+                "timestamp": datetime.now().isoformat(),
+                "cache_expires_in": CACHE_TIMEOUT
             }
             _set_cache_data(cache_key, empty_response)
             return Response(

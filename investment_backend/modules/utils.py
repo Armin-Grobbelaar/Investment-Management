@@ -76,55 +76,22 @@ def _fetch_and_store_historical_data(cursor, investment_ticker: str, investment_
 
 def _handle_forex_investment(cursor, investment_id: int, unit_currency: str, initial_date: str, institution_name: str, database_name: str) -> None:
     """
-    Handle automatic creation of Forex investment if needed.
+    Ensure exchange rate data exists for a foreign-currency investment.
+
+    When a non-base-currency investment is added, this downloads historical
+    exchange rates into the `exchange_rates` table (if not already present).
+    No Forex pseudo-investment is created — exchange rates are stored in their
+    own dedicated table.
     """
-    # If the investment is not in ZAR (native currency), we might need to track the exchange rate
-    if unit_currency == "R" or unit_currency == "ZAR":
-        return
+    from .currency import resolve_currency_code, BASE_CURRENCY_CODE, ensure_exchange_rates_exist
 
-    # Check if we already have a forex investment for this currency pair (e.g. USDZAR=X)
-    forex_ticker = f"{unit_currency}ZAR=X"
-    
-    cursor.execute("SELECT id FROM investments WHERE investment_ticker = %s", (forex_ticker,))
-    if cursor.fetchone():
-        return  # Already exists
+    inv_curr = resolve_currency_code(unit_currency)
+    if inv_curr == BASE_CURRENCY_CODE:
+        return  # Same currency — no FX needed
 
-    print(f"Creating automatic Forex investment for {unit_currency}...")
-    
-    # We need to call add_investment recursively, but we can't import it here directly due to circular imports.
-    # We'll do a direct insert instead.
-    
+    print(f"🔄 Ensuring exchange rates exist for {inv_curr}/{BASE_CURRENCY_CODE}...")
     try:
-        # Fetch initial data for forex
-        ticker = yf.Ticker(forex_ticker)
-        hist = ticker.history(period="1d")
-        
-        if hist.empty:
-            print(f"Could not fetch data for {forex_ticker}")
-            return
-            
-        current_price = float(hist["Close"].iloc[-1])
-        
-        cursor.execute("""
-            INSERT INTO investments (
-                institution_name, initial_investment_date, investment_type,
-                investment_name, investment_ticker, unit_currency,
-                initial_unit_price, unit_price, number_of_units_held,
-                total_dividends_received, total_tax_paid, total_fees_paid,
-                investment_fee, investment_status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (
-            institution_name, initial_date, "Forex",
-            f"{unit_currency}/ZAR Exchange Rate", forex_ticker, "ZAR",
-            current_price, current_price, 0, # 0 units held as it's just for tracking
-            0, 0, 0, 0, "Active"
-        ))
-        
-        forex_id = cursor.fetchone()[0]
-        
-        # Fetch history for this new forex investment
-        _fetch_and_store_historical_data(cursor, forex_ticker, forex_id, database_name)
-        
+        ensure_exchange_rates_exist(inv_curr, BASE_CURRENCY_CODE, database_name)
     except Exception as e:
-        print(f"Error creating forex investment: {e}")
+        print(f"⚠️ Could not sync exchange rates for {inv_curr}/{BASE_CURRENCY_CODE}: {e}")
+        print("   Currency conversion will fall back to rate=1.0 until rates are synced.")

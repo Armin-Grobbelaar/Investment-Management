@@ -100,10 +100,13 @@ def get_portfolio_metrics_data_api(database_name: str, dimension_type: str = "po
             current_val = float(latest[2] or 0)
             ret_amt = float(latest[3] or 0)
             
+            # Fetch base currency from dimension or use ZAR as default
+            base_curr = "R" # Default symbol
+            
             key_metrics = [
-                {"title": "Total Value", "value": f"R{current_val:,.2f}", "trend": "up", "change": ""},
-                {"title": "Contributions", "value": f"R{contrib:,.2f}", "trend": "neutral", "change": ""},
-                {"title": "Net Growth", "value": f"R{ret_amt:,.2f}", "trend": "up" if ret_amt > 0 else "down", "change": ""},
+                {"title": "Total Value", "value": f"{base_curr}{current_val:,.2f}", "trend": "up", "change": ""},
+                {"title": "Contributions", "value": f"{base_curr}{contrib:,.2f}", "trend": "neutral", "change": ""},
+                {"title": "Net Growth", "value": f"{base_curr}{ret_amt:,.2f}", "trend": "up" if ret_amt > 0 else "down", "change": ""},
                 {"title": "Active Investments", "value": str(latest[8]), "trend": "neutral", "change": ""}
             ]
             
@@ -119,7 +122,7 @@ def get_portfolio_metrics_data_api(database_name: str, dimension_type: str = "po
                 "fee_analysis": fee_analysis,
                 "tax_analysis": tax_analysis,
                 "cagr_trend": cagr_trend,
-                "irr_trend": cagr_trend,
+                "irr_trend": irr_trend,
                 "key_metrics": key_metrics,
                 "conclusion": conclusion,
                 "filter_type": dimension_type,

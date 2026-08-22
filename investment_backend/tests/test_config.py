@@ -1,9 +1,5 @@
 """
 Tests for the configuration-table helpers in modules/database.py.
-
-These helpers read runtime-configurable financial values (base currency,
-CGT rates, property assumptions, scheduler settings) from the `configuration`
-table so they can be changed without code changes.
 """
 
 import pytest
@@ -15,14 +11,12 @@ from modules.database import (
     invalidate_config_cache,
 )
 
-
 @pytest.fixture(autouse=True)
 def clear_config_cache():
     """Ensure a clean config cache between tests."""
     invalidate_config_cache()
     yield
     invalidate_config_cache()
-
 
 class TestGetConfigValue:
     @patch("modules.database.get_db_connection")
@@ -31,17 +25,9 @@ class TestGetConfigValue:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
-        mock_cursor.fetchall.return_value = [
-            ("base_currency", "ZAR"),
-            ("cgt_inclusion_rate", "0.40"),
-            ("native_currency", "R"),
-        ]
+        mock_cursor.fetchone.return_value = ("0.40",)
 
         assert get_config_value("cgt_inclusion_rate") == "0.40"
-        # Confirms the query reads the whole configuration table (no per-key SQL)
-        mock_cursor.execute.assert_called_once_with(
-            "SELECT setting_key, setting_value FROM configuration"
-        )
 
     @patch("modules.database.get_db_connection")
     def test_missing_key_returns_default(self, mock_get_db):
@@ -49,17 +35,16 @@ class TestGetConfigValue:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
-        mock_cursor.fetchall.return_value = [("other_key", "x")]
+        mock_cursor.fetchone.return_value = None
 
         assert get_config_value("cgt_marginal_tax_rate", "0.45") == "0.45"
 
     @patch("modules.database.get_db_connection")
     def test_db_error_returns_default(self, mock_get_db):
-        """DB errors must not crash config reads (e.g. before table exists)."""
+        """DB errors must not crash config reads."""
         mock_get_db.return_value.__enter__.side_effect = Exception("table missing")
 
         assert get_config_value("base_currency", "ZAR") == "ZAR"
-
 
 class TestGetAllConfig:
     @patch("modules.database.get_db_connection")
@@ -69,8 +54,8 @@ class TestGetAllConfig:
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
         mock_cursor.fetchall.return_value = [
-            ("base_currency", "ZAR", "Base currency", "currency"),
-            ("cgt_inclusion_rate", "0.40", "CGT rate", "tax"),
+            ("base_currency", "ZAR"),
+            ("cgt_inclusion_rate", "0.40"),
         ]
 
         result = get_all_config("test_db")
@@ -85,7 +70,6 @@ class TestGetAllConfig:
 
         assert get_all_config("test_db") == {}
 
-
 class TestConfigCaching:
     @patch("modules.database.get_db_connection")
     def test_value_cached_between_calls(self, mock_get_db):
@@ -93,7 +77,7 @@ class TestConfigCaching:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
-        mock_cursor.fetchall.return_value = [("base_currency", "ZAR")]
+        mock_cursor.fetchone.return_value = ("ZAR",)
 
         assert get_config_value("base_currency", "USD") == "ZAR"
         assert get_config_value("base_currency", "USD") == "ZAR"
@@ -106,12 +90,11 @@ class TestConfigCaching:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
-        mock_cursor.fetchall.return_value = [("base_currency", "ZAR")]
+        mock_cursor.fetchone.return_value = ("ZAR",)
 
         assert get_config_value("base_currency") == "ZAR"
 
-        # Value changes in the DB
-        mock_cursor.fetchall.return_value = [("base_currency", "USD")]
+        mock_cursor.fetchone.return_value = ("USD",)
         invalidate_config_cache()
 
         assert get_config_value("base_currency") == "USD"

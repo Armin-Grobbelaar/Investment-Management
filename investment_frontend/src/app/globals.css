@@ -1,49 +1,38 @@
-@import url('https://fonts.googleapis.com/css?family=Noto%20Serif%20Gujarati:700|Noto%20Serif%20Gujarati:400');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* For WebKit/Blink browsers */
 ::-webkit-scrollbar {
-  width: 12px;
+  width: 8px;
+  height: 8px;
 }
 
 /* Track */
 ::-webkit-scrollbar-track {
-  background: transparent; /* You can change this to match your theme */
+  background: rgba(15, 23, 42, 0.6);
 }
 
 /* Handle */
 ::-webkit-scrollbar-thumb {
-  background: #888; /* You can change this to match your theme */
-  border-radius: 6px;
+  background: #334155;
+  border-radius: 4px;
 }
 
 /* Handle on hover */
 ::-webkit-scrollbar-thumb:hover {
-  background: #555; /* You can change this to match your theme */
+  background: #475569;
 }
 
 body {
-  background-color: #101214; /* Change this to your desired background color */
-  font-family: 'Noto Serif Gujarati';
-  font-weight: 400;
+  background-color: #0b0f17;
+  color: #f8fafc;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
 }
-
-h1, h2, h3, h4, h5 {
-  font-family: 'Noto Serif Gujarati';
-  font-weight: 700;
-}
-
-html {font-size: 100%;} /* 16px */
-
-h1 {font-size: 4.210rem; /* 67.36px */}
-
-h2 {font-size: 3.158rem; /* 50.56px */}
-
-h3 {font-size: 2.369rem; /* 37.92px */}
-
-h4 {font-size: 1.777rem; /* 28.48px */}
-
-h5 {font-size: 1.333rem; /* 21.28px */}
-
-small {font-size: 0.750rem; /* 12px */}
 
 .loading-container {
   display: flex;

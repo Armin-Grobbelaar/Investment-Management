@@ -440,7 +440,13 @@ def get_net_worth_timeseries(database_name: str = DEFAULT_DB,
             timeline = inv_cum_units.get(inv_id)
             if not timeline:
                 return 0.0
-            idx = bisect.bisect_right(timeline, (target_date, float('inf'))) - 1
+            
+            # Ensure target_date is a date object for comparison
+            t_dt = target_date
+            if hasattr(t_dt, 'date'):
+                t_dt = t_dt.date()
+                
+            idx = bisect.bisect_right(timeline, (t_dt, float('inf'))) - 1
             if idx < 0:
                 return 0.0
             return max(0.0, timeline[idx][1])

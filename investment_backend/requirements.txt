@@ -37,4 +37,6 @@ keras>=3.0.0
 openpyxl
 numpy-financial
 playwright
+beautifulsoup4
+lxml
 
