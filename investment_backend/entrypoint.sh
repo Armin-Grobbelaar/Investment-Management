@@ -8,21 +8,23 @@ host = os.environ.get('POSTGRES_HOST', 'localhost')
 port = int(os.environ.get('POSTGRES_PORT', '5432'))
 user = os.environ.get('POSTGRES_USER', 'postgres')
 pwd = os.environ.get('POSTGRES_PASSWORD', 'changeme')
-db = os.environ.get('INVESTMENTS_DB', 'Investments')
+db = os.environ.get('INVESTMENTS_DB', 'investments_app')
 
 for _ in range(30):
     try:
-        conn = psycopg2.connect(host=host, port=port, user=user, password=pwd, dbname=db)
+        conn = psycopg2.connect(host=host, port=port, user=user, password=pwd, dbname='postgres')
         conn.close()
-        print('PostgreSQL is ready')
+        print('PostgreSQL engine is ready')
         break
     except Exception as e:
         print('Waiting for DB connection...', str(e))
         time.sleep(2)
 "
 
-# Start FastAPI backend in the background, restarting if it crashes so the
-# container stays functional (the frontend runs in the foreground below).
+echo "Initializing central multi-tenant database..."
+python3 create_central_db.py
+
+# Start FastAPI backend in the background
 echo "Starting FastAPI backend..."
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 (

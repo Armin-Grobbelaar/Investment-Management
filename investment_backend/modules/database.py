@@ -1,180 +1,232 @@
 import os
 import psycopg2
+import hashlib
+import binascii
 from psycopg2.extensions import AsIs, ISOLATION_LEVEL_AUTOCOMMIT
 from contextlib import contextmanager
+from typing import Optional
 
 # Configuration constants
 DB_HOST = os.environ.get("POSTGRES_HOST", "ThinkTank")
 DB_USER = os.environ.get("POSTGRES_USER", "postgres")
 DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "changeme")
 DB_PORT = int(os.environ.get("POSTGRES_PORT", 5432))
-DEFAULT_DB = os.environ.get("INVESTMENTS_DB", "Investments")
-USERS_DB = os.environ.get("USERS_DB", "Users")
+DEFAULT_DB = os.environ.get("POSTGRES_DB", os.environ.get("INVESTMENTS_DB", "investments_app"))
+USERS_DB = os.environ.get("USERS_DB", DEFAULT_DB)
+
+def hash_password(password: str) -> str:
+    """Hash a password using SHA-512 PBKDF2 with 100,000 iterations and random salt."""
+    salt = hashlib.sha256(os.urandom(60)).hexdigest().encode('ascii')
+    pwdhash = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, 100000)
+    pwdhash = binascii.hexlify(pwdhash)
+    return (salt + pwdhash).decode('ascii')
+
+def verify_password(stored_password: str, provided_password: str) -> bool:
+    """Verify a stored password against one provided by user."""
+    if not stored_password or len(stored_password) < 64:
+        return False
+    salt = stored_password[:64]
+    stored_hash = stored_password[64:]
+    pwdhash = hashlib.pbkdf2_hmac('sha512', provided_password.encode('utf-8'), salt.encode('ascii'), 100000)
+    pwdhash = binascii.hexlify(pwdhash).decode('ascii')
+    return pwdhash == stored_hash
 
 @contextmanager
-def get_db_connection(database_name):
-    """Context manager for database connections."""
+def get_db_connection(database_name: str = None, user_id: Optional[int] = None):
+    """
+    Context manager for database connections.
+    Always targets central DEFAULT_DB ('investments_app') and sets session `app.current_user_id` for PostgreSQL RLS policies.
+    """
+    target_db = "postgres" if database_name == "postgres" else DEFAULT_DB
     conn = psycopg2.connect(
         host=DB_HOST,
-        database=database_name,
+        database=target_db,
         user=DB_USER,
         password=DB_PASSWORD,
         port=DB_PORT
     )
     try:
-        yield conn, conn.cursor()
+        cursor = conn.cursor()
+        if user_id is not None:
+            cursor.execute("SELECT set_config('app.current_user_id', %s, false)", (str(user_id),))
+        yield conn, cursor
     finally:
         conn.close()
 
-def create_connection(database_name):
-    """
-    Legacy connection creator. 
-    Note: It's better to use get_db_connection context manager.
-    """
-    global investment_database_connection
-    global investment_database_cursor
-
-    investment_database_connection = psycopg2.connect(
-        host=DB_HOST, 
-        database=database_name, 
-        user=DB_USER, 
-        password=DB_PASSWORD, 
+def create_connection(database_name: str = None, user_id: Optional[int] = None):
+    """Legacy connection creator."""
+    target_db = "postgres" if database_name == "postgres" else DEFAULT_DB
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=target_db,
+        user=DB_USER,
+        password=DB_PASSWORD,
         port=DB_PORT
     )
+    cursor = conn.cursor()
+    if user_id is not None:
+        cursor.execute("SELECT set_config('app.current_user_id', %s, false)", (str(user_id),))
+    return conn, cursor
 
-    investment_database_cursor = investment_database_connection.cursor()
-    return investment_database_connection, investment_database_cursor
+def add_user(username: str, email: str, password: str, full_name: str = None) -> dict:
+    """Add a new user to the central database."""
+    password_hash = hash_password(password)
+    sanitized_name = "".join([c for c in username.lower() if c.isalnum() or c == '_'])[:63]
+    database_name = CENTRAL_DB = DEFAULT_DB
 
-def add_user(name, surname):
-    """Add a new user and create their database."""
-    # Connect to postgres db to create new db
-    database_connection = psycopg2.connect(
-        host=DB_HOST, 
-        database="postgres", 
-        user=DB_USER, 
-        password=DB_PASSWORD, 
-        port=DB_PORT
-    )
-    database_connection.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-    database_cursor = database_connection.cursor()
-    
-    import re
-    # Sanitize: only allow lowercase alphanumeric + underscores in the identifier
-    sanitized_name = re.sub(r'[^a-z0-9_]', '_', name.lower())[:63]
-    database_name = sanitized_name + "_investment_database"
-    # psycopg2 cannot parameterise identifiers in CREATE DATABASE; use AsIs with the
-    # now-sanitised value (only [a-z0-9_] chars are present).
-    database_cursor.execute("CREATE database %s", (AsIs(database_name), ))
-    database_connection.commit()
-    database_cursor.close()
-    database_connection.close()
+    with get_db_connection(DEFAULT_DB) as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO users (username, email, password_hash, full_name, database_name) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (username, email, password_hash, full_name, database_name)
+        )
+        new_id = cursor.fetchone()[0]
+        conn.commit()
 
-    # Add user to Users db
-    user_database_connection = psycopg2.connect(
-        host=DB_HOST, 
-        database=USERS_DB, 
-        user=DB_USER, 
-        password=DB_PASSWORD, 
-        port=DB_PORT
-    )
-    user_database_cursor = user_database_connection.cursor()
-    user_database_cursor.execute(
-        "INSERT INTO users (name, surname, database_name) VALUES (%s, %s, %s)", 
-        (name, surname, database_name)
-    )
-    user_database_connection.commit()
-    user_database_cursor.close()
-    user_database_connection.close()
+    from .auth import create_jwt_token
+    token = create_jwt_token({
+        "sub": str(new_id),
+        "username": username,
+        "email": email,
+        "full_name": full_name,
+        "database_name": database_name
+    })
 
-    # Initialize the new database
-    investment_database_connection = psycopg2.connect(
-        host=DB_HOST, 
-        database=database_name, 
-        user=DB_USER, 
-        password=DB_PASSWORD, 
-        port=DB_PORT
-    )
-    investment_database_cursor = investment_database_connection.cursor()
-    
-    # Create tables
-    investment_database_cursor.execute("CREATE TABLE investments (id BIGSERIAL NOT NULL PRIMARY KEY, institution_name VARCHAR(200) NOT NULL, initial_investment_date DATE NOT NULL, investment_type VARCHAR(50) NOT NULL, investment_name VARCHAR(200), investment_ticker VARCHAR(50) NOT NULL UNIQUE, unit_currency VARCHAR(5) NOT NULL, initial_unit_price float8 NOT NULL, unit_price float8 NOT NULL, number_of_units_held float8 NOT NULL, total_dividends_received float8 NOT NULL, total_tax_paid float8 NOT NULL, total_fees_paid float8 NOT NULL, investment_fee float8 NOT NULL, investment_status VARCHAR(20) NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE unit_prices (id BIGINT NOT NULL REFERENCES investments(id), unit_price_date DATE NOT NULL, unit_price float8 NOT NULL, unit_price_change float8 NOT NULL, percentage_unit_price_change float8 NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE returns (id BIGINT NOT NULL REFERENCES investments(id), returns_date DATE NOT NULL, monthly_return float8 NOT NULL, quarterly_return float8 NOT NULL, half_yearly_return float8 NOT NULL, yearly_return float8 NOT NULL, yearly_3_return float8 NOT NULL, yearly_5_return float8 NOT NULL, return_since_inception float8 NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE transactions (id BIGINT NOT NULL REFERENCES investments(id), transaction_date DATE NOT NULL, transaction_type VARCHAR(20) NOT NULL, transaction_amount float8 NOT NULL, unit_price float8 NOT NULL, number_of_units float8 NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE dividends (id BIGINT NOT NULL REFERENCES investments(id), dividend_date DATE NOT NULL, dividend_frequency int NOT NULL, dividend_recieved float8 NOT NULL, dividend_percentage float8 NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE fees (id BIGINT NOT NULL REFERENCES investments(id), fee_date DATE NOT NULL, fee_type VARCHAR(50), fee_paid float8 NOT NULL, fee_frequency float8 NOT  NULL, number_of_units float8 NOT NULL, investment_fee float8 NOT NULL)")
-    investment_database_cursor.execute("CREATE TABLE tax (id BIGINT NOT NULL REFERENCES investments(id), tax_date DATE NOT NULL, tax_paid float8 NOT NULL, tax_percentage float8 NOT NULL)")
-    
-    investment_database_cursor.close()
-    investment_database_connection.close()
+    return {
+        'id': new_id,
+        'username': username,
+        'email': email,
+        'full_name': full_name,
+        'database_name': database_name,
+        'token': token
+    }
+
+def verify_user(username: str, password: str) -> Optional[dict]:
+    """Verify user credentials and return user info with JWT token."""
+    with get_db_connection(DEFAULT_DB) as (conn, cursor):
+        cursor.execute(
+            "SELECT id, username, email, password_hash, full_name, database_name FROM users WHERE username = %s OR email = %s",
+            (username, username)
+        )
+        user = cursor.fetchone()
+        if user and verify_password(user[3], password):
+            u_id = user[0]
+            u_name = user[1]
+            u_email = user[2]
+            u_fullname = user[4]
+            u_dbname = user[5] or DEFAULT_DB
+            
+            from .auth import create_jwt_token
+            token = create_jwt_token({
+                "sub": str(u_id),
+                "username": u_name,
+                "email": u_email,
+                "full_name": u_fullname,
+                "database_name": u_dbname
+            })
+            
+            return {
+                'id': u_id,
+                'username': u_name,
+                'email': u_email,
+                'full_name': u_fullname,
+                'database_name': u_dbname,
+                'token': token
+            }
+    return None
+
+def get_user_by_username(username: str) -> Optional[dict]:
+    """Get user by username without password verification."""
+    with get_db_connection(DEFAULT_DB) as (conn, cursor):
+        cursor.execute(
+            "SELECT id, username, email, full_name, database_name FROM users WHERE username = %s",
+            (username,)
+        )
+        user = cursor.fetchone()
+        if user:
+            return {
+                'id': user[0],
+                'username': user[1],
+                'email': user[2],
+                'full_name': user[3],
+                'database_name': user[4] or DEFAULT_DB
+            }
+    return None
 
 # ---------------------------------------------------------------------------
-# Configuration helpers — read from the `configuration` table
+# Configuration helpers — read from `configuration` table scoped by user_id
 # ---------------------------------------------------------------------------
 _config_cache: dict = {}
 _config_cache_expiry = None
 _CONFIG_CACHE_TTL = 300  # seconds
 
-def get_config_value(key: str, default=None, database_name: str = None):
-    """Read a single setting_value from the configuration table.
-    
-    Results are cached in-process for CONFIG_CACHE_TTL seconds to avoid
-    hammering the DB on every request.
-    """
+def get_config_value(key: str, default=None, database_name: str = None, user_id: Optional[int] = None):
+    """Read a setting from configuration table scoped by user_id."""
     import time
-    from datetime import datetime, timedelta
-
     global _config_cache, _config_cache_expiry
 
     db = database_name or DEFAULT_DB
+    cache_key = f"{user_id or 0}:{key}"
 
     now = time.time()
-    if _config_cache_expiry and now < _config_cache_expiry and db in _config_cache:
-        return _config_cache[db].get(key, default)
+    if _config_cache_expiry and now < _config_cache_expiry and cache_key in _config_cache:
+        return _config_cache[cache_key]
 
-    # Rebuild cache from DB
     try:
-        with get_db_connection(db) as (conn, cursor):
-            cursor.execute("SELECT setting_key, setting_value FROM configuration")
-            cache = {row[0]: row[1] for row in cursor.fetchall()}
-        _config_cache[db] = cache
-        _config_cache_expiry = now + _CONFIG_CACHE_TTL
+        with get_db_connection(db, user_id=user_id) as (conn, cursor):
+            if user_id is not None:
+                cursor.execute("SELECT setting_value FROM configuration WHERE user_id = %s AND setting_key = %s", (user_id, key))
+            else:
+                cursor.execute("SELECT setting_value FROM configuration WHERE setting_key = %s LIMIT 1", (key,))
+            row = cursor.fetchone()
+            val = row[0] if row else default
+            _config_cache[cache_key] = val
+            _config_cache_expiry = now + _CONFIG_CACHE_TTL
+            return val
     except Exception:
-        # If table doesn't exist yet or DB error, return default silently
         return default
 
-    return _config_cache.get(db, {}).get(key, default)
-
-
-def get_all_config(database_name: str = None) -> dict:
-    """Return the full configuration dict from the configuration table."""
+def get_all_config(database_name: str = None, user_id: Optional[int] = None) -> dict:
+    """Return full configuration dict from configuration table scoped by user_id."""
     db = database_name or DEFAULT_DB
-    import time
-
-    global _config_cache, _config_cache_expiry
-    now = time.time()
-
-    if _config_cache_expiry and now < _config_cache_expiry and db in _config_cache:
-        return dict(_config_cache[db])
-
     try:
-        with get_db_connection(db) as (conn, cursor):
-            cursor.execute(
-                "SELECT setting_key, setting_value, setting_description, setting_category "
-                "FROM configuration ORDER BY setting_category, setting_key"
-            )
-            cache = {}
-            for row in cursor.fetchall():
-                cache[row[0]] = row[1]  # key -> value
-            _config_cache[db] = cache
-            _config_cache_expiry = now + _CONFIG_CACHE_TTL
-            return dict(cache)
+        with get_db_connection(db, user_id=user_id) as (conn, cursor):
+            if user_id is not None:
+                cursor.execute(
+                    "SELECT setting_key, setting_value FROM configuration WHERE user_id = %s ORDER BY setting_category, setting_key",
+                    (user_id,)
+                )
+            else:
+                cursor.execute("SELECT setting_key, setting_value FROM configuration ORDER BY setting_category, setting_key")
+            return {row[0]: row[1] for row in cursor.fetchall()}
     except Exception:
         return {}
 
-
-def invalidate_config_cache(database_name: str = None):
-    """Clear the in-memory config cache (call after config is updated)."""
+def invalidate_config_cache(database_name: str = None, user_id: Optional[int] = None):
+    """Clear the in-memory config cache."""
     global _config_cache, _config_cache_expiry
     _config_cache = {}
     _config_cache_expiry = None
+
+def get_asset_manager_url_patterns(database_name: str = None) -> dict:
+    """Load URL patterns for asset managers from database."""
+    db = database_name or DEFAULT_DB
+    patterns = {}
+    try:
+        with get_db_connection(db) as (conn, cursor):
+            cursor.execute("""
+                SELECT manager_name_normalized, factsheet_type, url_pattern, pattern_priority
+                FROM asset_manager_url_patterns
+                WHERE is_active = true
+                ORDER BY manager_name_normalized, factsheet_type, pattern_priority
+            """)
+            for row in cursor.fetchall():
+                manager_norm, ftype, pattern, priority = row
+                if manager_norm not in patterns: patterns[manager_norm] = {}
+                if ftype not in patterns[manager_norm]: patterns[manager_norm][ftype] = []
+                patterns[manager_norm][ftype].append((pattern, priority))
+    except Exception as e:
+        patterns = {}
+    return patterns
+
+def invalidate_asset_manager_patterns_cache(database_name: str = None):
+    pass

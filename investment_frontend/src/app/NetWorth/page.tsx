@@ -5,7 +5,7 @@ import axios from "axios";
 import {
     Box, Container, Grid, Card, CardContent, Typography, CircularProgress,
     Paper, Chip, Divider, IconButton, ToggleButton, ToggleButtonGroup, Tooltip,
-    LinearProgress, Alert
+    LinearProgress, Alert, Select, MenuItem, FormControl, InputLabel
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
@@ -88,17 +88,41 @@ export default function NetWorthTracker() {
     const [darkMode, setDarkMode] = useState(false);
     const [timeRange, setTimeRange] = useState<"all" | "1y" | "3y" | "5y">("all");
     const [activeBreakdown, setActiveBreakdown] = useState<"type" | "institution" | "currency">("type");
+    const [baseCurrency, setBaseCurrency] = useState<string>("ZAR");
+    const [availableCurrencies, setAvailableCurrencies] = useState<string[]>([]);
+    const [currenciesLoaded, setCurrenciesLoaded] = useState(false);
     const chartRef = useRef<ChartJS<"line"> | null>(null);
 
     const menuItems = [
         { heading: "Navigation", items: ["Dashboard", "Net Worth", "IRR Analysis", "Property Analysis", "Metrics", "Predictions", "Edit Data"], urls: ["/Investments", "/NetWorth", "/IRRAnalysis", "/PropertyAnalysis", "/ViewInvestmentMetrics", "/ViewInvestmentPredictions", "/EditInvestmentData"] }
     ];
 
+    // Fetch available currencies on mount
     useEffect(() => {
+        async function fetchCurrencies() {
+            try {
+                const res = await axios.get("/api/currencies");
+                const currencies = res.data?.currencies || ["ZAR", "USD", "EUR", "GBP"];
+                setAvailableCurrencies(currencies);
+                const defaultCurrency = currencies.includes("ZAR") ? "ZAR" : currencies[0];
+                setBaseCurrency(defaultCurrency);
+            } catch (err) {
+                console.warn("Failed to fetch currencies, using defaults:", err);
+                setAvailableCurrencies(["ZAR", "USD", "EUR", "GBP"]);
+                setBaseCurrency("ZAR");
+            } finally {
+                setCurrenciesLoaded(true);
+            }
+        }
+        fetchCurrencies();
+    }, []);
+
+    useEffect(() => {
+        if (!currenciesLoaded) return;
         async function fetchData() {
             try {
                 setLoading(true);
-                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=ZAR`);
+                const res = await axios.get(`/api/net_worth/${DB_NAME}?base_currency=${baseCurrency}`);
                 setData(res.data);
             } catch (err: any) {
                 setError(err.message || "Failed to load net worth data");
@@ -107,7 +131,7 @@ export default function NetWorthTracker() {
             }
         }
         fetchData();
-    }, []);
+    }, [baseCurrency, currenciesLoaded]);
 
     // ── Filter timeseries by selected range ──────────────────────────────────
     const filteredTimeseries = (() => {
@@ -246,6 +270,21 @@ export default function NetWorthTracker() {
                         </Typography>
                     </Box>
                     <Box sx={{ flex: 1 }} />
+                    <FormControl size="small" sx={{ minWidth: 100, mr: 2 }}>
+                        <Select
+                            value={baseCurrency}
+                            onChange={(e) => setBaseCurrency(e.target.value)}
+                            sx={{
+                                color: textSecondary,
+                                '& .MuiOutlinedInput-notchedOutline': { borderColor: darkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)' },
+                                height: '35px'
+                            }}
+                        >
+                            {availableCurrencies.map(c => (
+                                <MenuItem key={c} value={c}>{c}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
                     <IconButton onClick={() => setDarkMode(d => !d)} sx={{ color: textSecondary }}>
                         {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
                     </IconButton>

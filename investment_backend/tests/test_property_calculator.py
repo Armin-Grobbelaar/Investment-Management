@@ -166,6 +166,7 @@ class TestRunPropertyProjection:
             monthly_other_costs=0, monthly_rental_income=12_000,
             rental_growth_rate_pa=5.0, vacancy_rate_pct=5.0,
             property_growth_rate_pa=7.0, inflation_rate=5.0,
+            cgt_inclusion_rate=0.40, cgt_marginal_tax_rate=0.45,
             projection_years=20,
         )
         base.update(overrides)
@@ -184,10 +185,11 @@ class TestRunPropertyProjection:
         assert res["real_irr_20yr"] < res["irr_20yr"]
 
     def test_irr_negative_with_flat_property_growth(self):
-        """Flat property values and high costs should give a non-positive IRR."""
+        """Flat property values, zero rental income and high costs should give a non-positive IRR."""
         res = run_property_projection(**self._full_inputs(
             property_growth_rate_pa=0.0,
             rental_growth_rate_pa=0.0,
+            monthly_rental_income=0.0,
             vacancy_rate_pct=0.0,
             inflation_rate=0.0,
         ))

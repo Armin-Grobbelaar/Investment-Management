@@ -374,7 +374,7 @@ def seed_dividends(conn, inv_ids):
     # AGBF pays quarterly distributions
     agbf_id = inv_ids["AGBF"]
     for year in [2022, 2023, 2024, 2025, 2026]:
-        for quarter in range(1, 5):
+        for quarter in range(0, 4):
             d_date = date(year, 3 + quarter * 3, 15)
             if d_date > date.today():
                 break
@@ -437,7 +437,7 @@ def seed_fees(conn, inv_ids):
     # AGBF has quarterly fees
     agbf_id = inv_ids["AGBF"]
     for year in [2022, 2023, 2024, 2025, 2026]:
-        for quarter in range(1, 5):
+        for quarter in range(0, 4):
             fee_date = date(year, 3 + quarter * 3, 1)
             if fee_date > date.today():
                 break

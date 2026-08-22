@@ -1,13 +1,20 @@
 "use client";
 import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { Container, IconButton, Paper, Grid, Typography, Box, Card, CardContent, Button, CircularProgress } from "@mui/material";
+import {
+  Container, IconButton, Paper, Grid, Typography, Box, Card, CardContent,
+  Button, CircularProgress, Select, MenuItem as MuiMenuItem, FormControl, InputLabel
+} from "@mui/material";
 import axios from 'axios';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { ThemeProvider } from '@mui/material/styles';
 import { brandingDarkTheme, brandingLightTheme } from '../Themes/muiTheme';
 import DrawerComponent from '../Reusable Components/Drawers/SideMenyDrawer';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 // Lazy load heavy chart components
 const LineGraph = lazy(() => import('../Charts/Graphs/LineGraph'));
@@ -80,6 +87,9 @@ interface DashboardProps {
 }
 
 export default function InvestmentsDashboard({ filterType, filterValue }: DashboardProps) {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
   const [AllInvestmentValues, setAllInvestmentValues] = useState<any[] | null>(null);
   const [AllInvestmentPieValues, setAllInvestmentPieValues] = useState<any | null>(null);
   const [InvestmentSummary, setInvestmentSummary] = useState<InvestmentSummaryInterface[] | null>(null);
@@ -98,6 +108,18 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
   const [darkMode, setDarkMode] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [baseCurrency, setBaseCurrency] = useState<string>("ZAR");
+  const [availableCurrencies, setAvailableCurrencies] = useState<string[]>([]);
+  const [currenciesLoaded, setCurrenciesLoaded] = useState(false);
+  const [dbName, setDbName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/LoginPage');
+    } else if (status === 'authenticated') {
+      setDbName((session as any)?.database_name || "Investments");
+    }
+  }, [status, router, session]);
 
   // Sync theme with localStorage
   useEffect(() => {
@@ -115,22 +137,54 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
     });
   };
 
+  // Fetch available currencies on mount
   useEffect(() => {
+    async function fetchCurrencies() {
+      try {
+        const res = await axios.get("/api/currencies");
+        const currencies = res.data?.currencies || ["ZAR", "USD", "EUR", "GBP"];
+        setAvailableCurrencies(currencies);
+        // Use first available currency as default, or ZAR if available
+        const defaultCurrency = currencies.includes("ZAR") ? "ZAR" : currencies[0];
+        setBaseCurrency(defaultCurrency);
+      } catch (err) {
+        console.warn("Failed to fetch currencies, using defaults:", err);
+        setAvailableCurrencies(["ZAR", "USD", "EUR", "GBP"]);
+        setBaseCurrency("ZAR");
+      } finally {
+        setCurrenciesLoaded(true);
+      }
+    }
+    fetchCurrencies();
+  }, []);
+
+  useEffect(() => {
+    if (!dbName) return;
     async function fetchDashboardData() {
       try {
         setIsLoaded(false);
         setLoadError(null);
 
-        let endpoint = "/api/dashboard_charts/Investments";
+        let endpoint = `/api/dashboard_charts/${dbName}`;
+        const params = new URLSearchParams();
         if (filterType && filterValue) {
-          endpoint += `?filter_type=${encodeURIComponent(filterType)}&filter_value=${encodeURIComponent(filterValue)}`;
+          params.set("filter_type", filterType);
+          params.set("filter_value", filterValue);
+        }
+        params.set("base_currency", baseCurrency);
+        if ([...params].length) {
+          endpoint += `?${params.toString()}`;
         }
 
         console.log(`🚀 Fetching dashboard data from ${endpoint}...`);
         const response = await axios.get(endpoint, { timeout: 30000 });
         const chartData = response.data;
 
-        const dateRange = chartData.timeseries_date_range || {};
+        if (!chartData || typeof chartData !== 'object') {
+          throw new Error('Server returned an empty or invalid response');
+        }
+
+        const dateRange = chartData.timeseries_date_range || { min: null, max: null };
         const parsedMin = dateRange.min ? new Date(dateRange.min) : new Date('2023-01-01');
         const parsedMax = dateRange.max ? new Date(dateRange.max) : new Date();
 
@@ -159,8 +213,9 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
     }
 
     fetchDashboardData();
-  }, [filterType, filterValue]);
+  }, [filterType, filterValue, baseCurrency, dbName]);
 
+  const isEmpty = isLoaded && (!InvestmentSummary || InvestmentSummary.length === 0);
   const displayTitle = filterValue ? `${filterValue} Investments` : "All Investments";
 
   return (
@@ -172,6 +227,151 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
             <IconButton onClick={toggleDarkMode} color="inherit" style={{ position: 'absolute', top: '12px', right: '16px', zIndex: 10 }}>
               {darkMode ? <Brightness4Icon /> : <Brightness7Icon />}
             </IconButton>
+
+            <Box sx={{ position: 'absolute', top: '12px', right: '60px', zIndex: 10, display: 'flex', alignItems: 'center' }}>
+              <FormControl size="small" sx={{ minWidth: 100 }}>
+                <Select
+                  value={baseCurrency}
+                  onChange={(e) => setBaseCurrency(e.target.value)}
+                  sx={{
+                    color: darkMode ? '#fff' : 'inherit',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: darkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)' },
+                    height: '35px'
+                  }}
+                >
+                  {availableCurrencies.map(c => (
+                    <MuiMenuItem key={c} value={c}>{c}</MuiMenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+
+            {/* ── Empty-state screen ── */}
+            {isEmpty ? (
+              <Box
+                sx={{
+                  minHeight: '100vh',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  px: 3,
+                  textAlign: 'center',
+                }}
+              >
+                {/* Icon / illustration */}
+                <Box
+                  sx={{
+                    width: 120,
+                    height: 120,
+                    borderRadius: '50%',
+                    background: darkMode
+                      ? 'linear-gradient(135deg, rgba(0,127,255,0.25), rgba(0,84,168,0.15))'
+                      : 'linear-gradient(135deg, rgba(0,127,255,0.12), rgba(0,84,168,0.06))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mb: 3,
+                    border: '2px dashed',
+                    borderColor: 'primary.main',
+                    opacity: 0.85,
+                  }}
+                >
+                  <Typography sx={{ fontSize: 52, lineHeight: 1 }}>📊</Typography>
+                </Box>
+
+                <Typography variant="h4" component="h1" sx={{ fontWeight: 700, mb: 1 }}>
+                  Your Portfolio is Empty
+                </Typography>
+                <Typography
+                  variant="body1"
+                  color="textSecondary"
+                  sx={{ maxWidth: 480, mb: 4, lineHeight: 1.7 }}
+                >
+                  No investments found yet. Add your first investment manually or import
+                  multiple investments at once using the Bulk Import tool.
+                </Typography>
+
+                {/* Primary CTA */}
+                <Link href="/AddInvestment" passHref>
+                  <Button
+                    id="empty-state-add-investment-btn"
+                    variant="contained"
+                    size="large"
+                    startIcon={<AddCircleOutlineIcon />}
+                    sx={{
+                      mb: 2,
+                      px: 5,
+                      py: 1.5,
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      background: 'linear-gradient(135deg, #007FFF, #0054a8)',
+                      boxShadow: '0 4px 20px rgba(0,127,255,0.35)',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #0069d9, #004291)',
+                        boxShadow: '0 6px 24px rgba(0,127,255,0.45)',
+                        transform: 'translateY(-1px)',
+                      },
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    Add Your First Investment
+                  </Button>
+                </Link>
+
+                {/* Secondary CTA */}
+                <Link href="/BulkImport" passHref>
+                  <Button
+                    id="empty-state-bulk-import-btn"
+                    variant="outlined"
+                    size="large"
+                    startIcon={<UploadFileIcon />}
+                    sx={{
+                      mb: 4,
+                      px: 5,
+                      py: 1.5,
+                      fontSize: '1rem',
+                      fontWeight: 600,
+                      borderRadius: 3,
+                      borderWidth: 2,
+                      '&:hover': { borderWidth: 2, transform: 'translateY(-1px)' },
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    Bulk Import Investments
+                  </Button>
+                </Link>
+
+                {/* Tip note */}
+                <Paper
+                  elevation={0}
+                  sx={{
+                    maxWidth: 520,
+                    px: 3,
+                    py: 2,
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: darkMode ? 'rgba(0,127,255,0.3)' : 'rgba(0,127,255,0.2)',
+                    backgroundColor: darkMode ? 'rgba(0,127,255,0.08)' : 'rgba(0,127,255,0.04)',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 1.5,
+                    textAlign: 'left',
+                  }}
+                >
+                  <Typography sx={{ fontSize: 20, mt: 0.2 }}>💡</Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ lineHeight: 1.65 }}>
+                    <strong>Tip:</strong> Have many investments? Use{' '}
+                    <Link href="/BulkImport" passHref style={{ color: 'inherit', fontWeight: 600 }}>
+                      Bulk Import
+                    </Link>{' '}
+                    to upload a CSV or spreadsheet and add them all at once — saving you time
+                    compared to adding each one individually.
+                  </Typography>
+                </Paper>
+              </Box>
+            ) : (
 
             <Container maxWidth="xl" sx={{ py: 4 }}>
               {/* Header Title */}
@@ -390,6 +590,7 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
               </Box>
 
             </Container>
+            )}
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -400,7 +601,12 @@ export default function InvestmentsDashboard({ filterType, filterValue }: Dashbo
               <Box sx={{ textAlign: 'center', p: 4 }}>
                 <Typography variant="h5" color="error" gutterBottom>⚠️ Dashboard Error</Typography>
                 <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>{loadError}</Typography>
-                <Button variant="contained" onClick={() => window.location.reload()}>🔄 Retry</Button>
+                <Link href="/AddInvestment" passHref>
+                  <Button variant="contained" size="large" startIcon={<AddCircleOutlineIcon />} sx={{ mr: 2 }}>
+                    Add Investment
+                  </Button>
+                </Link>
+                <Button variant="outlined" onClick={() => window.location.reload()}>🔄 Retry</Button>
               </Box>
             ) : (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

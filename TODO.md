@@ -18,12 +18,12 @@
 - [ ] Monthly auto-download via Playwright
 - [ ] View historic factsheets
 
-## Phase 4: Upgrade Metrics
-- [ ] Per investment metrics
-- [ ] Per investment type (ETF, Unit Trust, etc.)
-- [ ] Per institution
-- [ ] Per account type (Tax Free, RA, Discretionary)
-- [ ] Per currency
+## Phase 4: Upgrade Metrics ✅
+- [x] Per investment metrics
+- [x] Per investment type (ETF, Unit Trust, etc.)
+- [x] Per institution
+- [x] Per account type (Tax Free, RA, Discretionary)
+- [x] Per currency
 
 ## Phase 5: Property Investment Expansion
 - [ ] Comprehensive property calculator (IRR, Net/Gross Yield, Bond, CGT, etc.)
@@ -40,5 +40,5 @@
 ## Phase 7: Testing & Verification
 - [ ] Test unit price extraction (yfinance + profiledata)
 - [ ] Test factsheet download/store/view
-- [ ] Verify IRR, net worth calculations
+- [x] Verify IRR, net worth calculations
 - [ ] Verify docker-compose works

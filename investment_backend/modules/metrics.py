@@ -360,32 +360,16 @@ def calculate_investment_metrics(
                 investment_metrics.loc[row_name, "total return"] = net_growth / total_contrib
                 investment_metrics.loc[row_name, "return multiple"] = current_val / total_contrib
                 
-                # CAGR using Modified Dietz for money-weighted returns.
-                # This accounts for the timing of contributions, giving a more
-                # accurate return than simple (final/initial)^(1/n)-1.
+                # CAGR: Compound Annual Growth Rate.
+                # Uses the return multiple (current_val / total_contributions) annualized
+                # over the investment period. This is the standard definition:
+                #   CAGR = (EMV / total_contributions)^(1/years) - 1
+                # For a single lump sum it equals the IRR; for multiple contributions
+                # it is a simple time-weighted approximation. The IRR (XIRR) field
+                # captures the full money-weighted (cash-flow-timing-aware) return.
                 if inv_period > 0 and current_val > 0:
-                    # Modified Dietz return:
-                    # R = (EMV - BMV - CF) / (BMV + Σ(wi × CFi))
-                    # With BMV=0 (inception), CF=total_contributions:
-                    # R = (EMV - total_contrib) / Σ(wi × contrib_i)
-                    # where wi = (valuation_date - contrib_date) / inv_period
-                    total_weighted_contrib = 0.0
-                    for _, row in contrib_df.iterrows():
-                        cf_date = row["date"]
-                        if isinstance(cf_date, str):
-                            cf_date = pd.to_datetime(cf_date)
-                        # Weight = fraction of period this cash flow was invested
-                        cf_years = fractional_years_between(cf_date, current_value_date)
-                        cf_weight = cf_years / inv_period
-                        total_weighted_contrib += row["contributions"] * cf_weight
-
-                    # Modified Dietz return (un-annualized period return)
-                    if total_weighted_contrib > 0:
-                        dietz_return = (current_val - total_contrib) / total_weighted_contrib
-                        investment_metrics.loc[row_name, "cagr"] = dietz_return
-                    else:
-                        # Fallback: all contributions at valuation date
-                        investment_metrics.loc[row_name, "cagr"] = 0.0
+                    return_multiple = current_val / total_contrib
+                    investment_metrics.loc[row_name, "cagr"] = return_multiple ** (1.0 / inv_period) - 1
             
             # IRR Calculation
             try:
@@ -452,7 +436,7 @@ def calculate_investment_metrics(
 
 def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_DB) -> None:
     """
-    Calculate and update investment metrics for a specific investment.
+    Calculate and update investment metrics for all historical month-end valuation dates.
     """
     print(f"Updating metrics for investment {investment_id}...")
     try:
@@ -463,75 +447,47 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
             if not res:
                 print(f"Investment ID {investment_id} not found.")
                 return
-            ticker, currency, units_held, unit_price = res
+            ticker, currency, total_units_held, current_unit_price = res
             
-            current_value = unit_price * units_held
-            current_date = date.today()
+            # Buy transactions with number of units
+            query_contrib = "SELECT transaction_date as date, transaction_amount as contributions, number_of_units as units FROM transactions WHERE investment_id = %s AND LOWER(transaction_type) = 'buy' ORDER BY date"
+            tx_df = pd.read_sql(query_contrib, conn, params=(investment_id,))
             
-            # Get latest price date and latest transaction date
-            cursor.execute("SELECT MAX(unit_price_date) FROM unit_prices WHERE investment_id = %s", (investment_id,))
-            latest_date_row = cursor.fetchone()
-            if latest_date_row and latest_date_row[0]:
-                current_date = latest_date_row[0]
-            
-            # The valuation date must be >= the last cash flow date.
-            # If transactions extend beyond the last price, use today's date
-            # so the XIRR terminal value is placed after all contributions.
-            cursor.execute(
-                "SELECT MAX(transaction_date) FROM transactions WHERE investment_id = %s",
-                (investment_id,)
-            )
-            max_txn_row = cursor.fetchone()
-            if max_txn_row and max_txn_row[0]:
-                max_txn = max_txn_row[0]
-                # Ensure current_date is at least as late as the last transaction
-                if isinstance(current_date, datetime):
-                    current_date_dt = current_date.date()
-                else:
-                    current_date_dt = current_date
-                if max_txn > current_date_dt:
-                    current_date = max_txn
-
-            # 2. Get contributions
-            query_contrib = "SELECT transaction_date as date, transaction_amount as contributions FROM transactions WHERE investment_id = %s AND LOWER(transaction_type) = 'buy'"
-            contributions_df = pd.read_sql(query_contrib, conn, params=(investment_id,))
-            
-            if contributions_df.empty:
-                # Fallback to initial investment if no transactions recorded
+            if tx_df.empty:
+                # Fallback to initial investment
                 cursor.execute("SELECT initial_investment_date, initial_unit_price, number_of_units_held FROM investments WHERE id = %s", (investment_id,))
                 init_res = cursor.fetchone()
                 if init_res and init_res[0] and init_res[1] is not None and init_res[2] is not None:
                     init_date, init_price, init_units = init_res
-                    contributions_df = pd.DataFrame([{
+                    tx_df = pd.DataFrame([{
                         'date': init_date,
-                        'contributions': float(init_price) * float(init_units)
+                        'contributions': float(init_price) * float(init_units),
+                        'units': float(init_units)
                     }])
             
-            if not contributions_df.empty:
-                contributions_df['date'] = pd.to_datetime(contributions_df['date'])
+            if not tx_df.empty:
+                tx_df['date'] = pd.to_datetime(tx_df['date'])
 
-            # 3. Get fees
+            # Fees, tax, dividends
             query_fees = "SELECT fee_date as date, fee_paid as fees FROM fees WHERE investment_id = %s"
             fees_df = pd.read_sql(query_fees, conn, params=(investment_id,))
-            if not fees_df.empty:
-                fees_df['date'] = pd.to_datetime(fees_df['date'])
+            if not fees_df.empty: fees_df['date'] = pd.to_datetime(fees_df['date'])
             
-            # 4. Get tax
             query_tax = "SELECT tax_date as date, tax_paid as tax FROM tax WHERE investment_id = %s"
             tax_df = pd.read_sql(query_tax, conn, params=(investment_id,))
-            if not tax_df.empty:
-                tax_df['date'] = pd.to_datetime(tax_df['date'])
+            if not tax_df.empty: tax_df['date'] = pd.to_datetime(tax_df['date'])
             
-            # 5. Get dividends
             query_div = "SELECT dividend_date as date, dividend_recieved as dividends FROM dividends WHERE investment_id = %s"
             dividends_df = pd.read_sql(query_div, conn, params=(investment_id,))
-            if not dividends_df.empty:
-                dividends_df['date'] = pd.to_datetime(dividends_df['date'])
+            if not dividends_df.empty: dividends_df['date'] = pd.to_datetime(dividends_df['date'])
             
-            # 6. Inflation
+            # Unit price history
+            query_prices = "SELECT unit_price_date as date, unit_price FROM unit_prices WHERE investment_id = %s ORDER BY date"
+            prices_df = pd.read_sql(query_prices, conn, params=(investment_id,))
+            
+            # Inflation
             currency_country_map = CURRENCY_COUNTRY_MAP
             country = currency_country_map.get(currency, 'South Africa')
-            
             query_inf = "SELECT inflation_date as date, inflation_rate FROM inflation WHERE country = %s ORDER BY date"
             inflation_df = pd.read_sql(query_inf, conn, params=(country,))
             if not inflation_df.empty:
@@ -540,71 +496,30 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                 inflation_df['date'] = inflation_df['date'].dt.date
             
             from .currency import convert_currency_amount, resolve_currency_code, BASE_CURRENCY_CODE
-            is_local = (resolve_currency_code(currency) == BASE_CURRENCY_CODE)
-            
-            # Convert current_date to datetime for adjust_for_inflation
-            current_date_dt = pd.to_datetime(current_date)
-            current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)
-            
-            args = {
-                'current_value_date': current_date_dt,
-            }
-            
-            if is_local:
-                args['contributions_local_df'] = contributions_df
-                args['fees_local_df'] = fees_df
-                args['tax_local_df'] = tax_df
-                args['dividends_local_df'] = dividends_df
-                args['current_value_local'] = current_value
-                args['local_inflation_df'] = inflation_df
-            else:
-                # Foreign investment: populate foreign and local (converted)
-                args['contributions_foreign_df'] = contributions_df
-                args['fees_foreign_df'] = fees_df
-                args['tax_foreign_df'] = tax_df
-                args['dividends_foreign_df'] = dividends_df
-                args['current_value_foreign'] = current_value
-                args['foreign_inflation_df'] = inflation_df
-                
-                # Convert to local (base) currency for portfolio-wide aggregation
-                rate_cache = {}
-                def convert_df(df, val_col):
-                    if df is None or df.empty: return None
-                    new_df = df.copy()
-                    converted_vals = []
-                    for _, row in df.iterrows():
-                        d_str = row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])
-                        val = convert_currency_amount(row[val_col], currency, BASE_CURRENCY_CODE, d_str, database_name, cursor, rate_cache)
-                        converted_vals.append(val)
-                    new_df[val_col] = converted_vals
-                    return new_df
-                
-                args['contributions_local_df'] = convert_df(contributions_df, 'contributions')
-                args['fees_local_df'] = convert_df(fees_df, 'fees')
-                args['tax_local_df'] = convert_df(tax_df, 'tax')
-                args['dividends_local_df'] = convert_df(dividends_df, 'dividends')
-                args['current_value_local'] = convert_currency_amount(current_value, currency, BASE_CURRENCY_CODE, current_date_str, database_name, cursor, rate_cache)
-                
-                # Also need local inflation for the local part
-                local_country = CURRENCY_COUNTRY_MAP.get(BASE_CURRENCY_CODE, 'South Africa')
-                query_local_inf = "SELECT inflation_date as date, inflation_rate FROM inflation WHERE country = %s ORDER BY date"
-                local_inflation_df = pd.read_sql(query_local_inf, conn, params=(local_country,))
-                if not local_inflation_df.empty:
-                    local_inflation_df['date'] = pd.to_datetime(local_inflation_df['date'])
-                    local_inflation_df['year'] = local_inflation_df['date'].dt.year
-                    local_inflation_df['date'] = local_inflation_df['date'].dt.date
-                args['local_inflation_df'] = local_inflation_df
-                
-            metrics = calculate_investment_metrics(**args)
-            
-            def get_m(row, col):
-                try:
-                    val = metrics.loc[row, col]
-                    return float(val) if not pd.isna(val) else None
-                except KeyError:
-                    return None
+            local_country = CURRENCY_COUNTRY_MAP.get(BASE_CURRENCY_CODE, 'South Africa')
+            query_local_inf = "SELECT inflation_date as date, inflation_rate FROM inflation WHERE country = %s ORDER BY date"
+            local_inflation_df = pd.read_sql(query_local_inf, conn, params=(local_country,))
+            if not local_inflation_df.empty:
+                local_inflation_df['date'] = pd.to_datetime(local_inflation_df['date'])
+                local_inflation_df['year'] = local_inflation_df['date'].dt.year
+                local_inflation_df['date'] = local_inflation_df['date'].dt.date
 
-            # Insert or Update
+            is_local = (resolve_currency_code(currency) == BASE_CURRENCY_CODE)
+            rate_cache = {}
+
+            # Target valuation dates: month-end dates from unit_prices + latest price date
+            target_dates = []
+            if not prices_df.empty:
+                prices_df['date'] = pd.to_datetime(prices_df['date'])
+                prices_df['month'] = prices_df['date'].dt.to_period('M')
+                month_ends = prices_df.groupby('month').last()
+                target_dates = list(month_ends['date'])
+                latest_p_date = prices_df['date'].max()
+                if latest_p_date not in target_dates:
+                    target_dates.append(latest_p_date)
+            else:
+                target_dates = [pd.to_datetime(date.today())]
+
             insert_query = """
                 INSERT INTO investment_metrics (
                     investment_id, metrics_date,
@@ -723,37 +638,104 @@ def update_investment_metrics(investment_id: int, database_name: str = DEFAULT_D
                     foreign_real_average_contributions = EXCLUDED.foreign_real_average_contributions,
                     foreign_real_investment_period = EXCLUDED.foreign_real_investment_period
             """
-            
-            params = (
-                investment_id, current_date,
-                get_m("local", "net growth"), get_m("local", "total return"), get_m("local", "return multiple"), get_m("local", "cagr"), get_m("local", "irr"),
-                get_m("local", "total fee ratio"), get_m("local", "total tax ratio"), get_m("local", "total cost ratio"), get_m("local", "dividend yield"),
-                get_m("local", "fee ratio annualized"), get_m("local", "tax ratio annualized"), get_m("local", "cost ratio annualized"), get_m("local", "dividend yield annualized"),
-                get_m("local", "total contributions"), get_m("local", "total fees"), get_m("local", "total tax"), get_m("local", "total dividends"),
-                get_m("local", "number of contributions"), get_m("local", "average contributions"), get_m("local", "investment period"),
 
-                get_m("local_inflation_adjusted", "net growth"), get_m("local_inflation_adjusted", "total return"), get_m("local_inflation_adjusted", "return multiple"), get_m("local_inflation_adjusted", "cagr"), get_m("local_inflation_adjusted", "irr"),
-                get_m("local_inflation_adjusted", "total fee ratio"), get_m("local_inflation_adjusted", "total tax ratio"), get_m("local_inflation_adjusted", "total cost ratio"), get_m("local_inflation_adjusted", "dividend yield"),
-                get_m("local_inflation_adjusted", "fee ratio annualized"), get_m("local_inflation_adjusted", "tax ratio annualized"), get_m("local_inflation_adjusted", "cost ratio annualized"), get_m("local_inflation_adjusted", "dividend yield annualized"),
-                get_m("local_inflation_adjusted", "total contributions"), get_m("local_inflation_adjusted", "total fees"), get_m("local_inflation_adjusted", "total tax"), get_m("local_inflation_adjusted", "total dividends"),
-                get_m("local_inflation_adjusted", "number of contributions"), get_m("local_inflation_adjusted", "average contributions"), get_m("local_inflation_adjusted", "investment period"),
+            for target_dt in target_dates:
+                val_date_dt = pd.to_datetime(target_dt)
+                val_date_str = val_date_dt.strftime('%Y-%m-%d')
+                
+                # Unit price on target_dt
+                if not prices_df.empty:
+                    p_sub = prices_df[prices_df['date'] <= val_date_dt]
+                    price_val = float(p_sub.iloc[-1]['unit_price']) if not p_sub.empty else current_unit_price
+                else:
+                    price_val = current_unit_price
 
-                get_m("foreign", "net growth"), get_m("foreign", "total return"), get_m("foreign", "return multiple"), get_m("foreign", "cagr"), get_m("foreign", "irr"),
-                get_m("foreign", "total fee ratio"), get_m("foreign", "total tax ratio"), get_m("foreign", "total cost ratio"), get_m("foreign", "dividend yield"),
-                get_m("foreign", "fee ratio annualized"), get_m("foreign", "tax ratio annualized"), get_m("foreign", "cost ratio annualized"), get_m("foreign", "dividend yield annualized"),
-                get_m("foreign", "total contributions"), get_m("foreign", "total fees"), get_m("foreign", "total tax"), get_m("foreign", "total dividends"),
-                get_m("foreign", "number of contributions"), get_m("foreign", "average contributions"), get_m("foreign", "investment period"),
+                # Subsets on or before target_dt
+                c_sub = tx_df[tx_df['date'] <= val_date_dt] if not tx_df.empty else pd.DataFrame()
+                if c_sub.empty:
+                    continue
 
-                get_m("foreign_inflation_adjusted", "net growth"), get_m("foreign_inflation_adjusted", "total return"), get_m("foreign_inflation_adjusted", "return multiple"), get_m("foreign_inflation_adjusted", "cagr"), get_m("foreign_inflation_adjusted", "irr"),
-                get_m("foreign_inflation_adjusted", "total fee ratio"), get_m("foreign_inflation_adjusted", "total tax ratio"), get_m("foreign_inflation_adjusted", "total cost ratio"), get_m("foreign_inflation_adjusted", "dividend yield"),
-                get_m("foreign_inflation_adjusted", "fee ratio annualized"), get_m("foreign_inflation_adjusted", "tax ratio annualized"), get_m("foreign_inflation_adjusted", "cost ratio annualized"), get_m("foreign_inflation_adjusted", "dividend yield annualized"),
-                get_m("foreign_inflation_adjusted", "total contributions"), get_m("foreign_inflation_adjusted", "total fees"), get_m("foreign_inflation_adjusted", "total tax"), get_m("foreign_inflation_adjusted", "total dividends"),
-                get_m("foreign_inflation_adjusted", "number of contributions"), get_m("foreign_inflation_adjusted", "average contributions"), get_m("foreign_inflation_adjusted", "investment period")
-            )
-            
-            cursor.execute(insert_query, params)
+                cum_units = float(c_sub['units'].sum()) if ('units' in c_sub.columns and pd.notna(c_sub['units'].sum())) else total_units_held
+                current_val = cum_units * price_val
+
+                contrib_df_sub = c_sub[['date', 'contributions']] if not c_sub.empty else None
+                f_sub = fees_df[fees_df['date'] <= val_date_dt] if not fees_df.empty else None
+                t_sub = tax_df[tax_df['date'] <= val_date_dt] if not tax_df.empty else None
+                d_sub = dividends_df[dividends_df['date'] <= val_date_dt] if not dividends_df.empty else None
+
+                args = {'current_value_date': val_date_dt}
+                if is_local:
+                    args['contributions_local_df'] = contrib_df_sub
+                    args['fees_local_df'] = f_sub
+                    args['tax_local_df'] = t_sub
+                    args['dividends_local_df'] = d_sub
+                    args['current_value_local'] = current_val
+                    args['local_inflation_df'] = inflation_df
+                else:
+                    args['contributions_foreign_df'] = contrib_df_sub
+                    args['fees_foreign_df'] = f_sub
+                    args['tax_foreign_df'] = t_sub
+                    args['dividends_foreign_df'] = d_sub
+                    args['current_value_foreign'] = current_val
+                    args['foreign_inflation_df'] = inflation_df
+
+                    def convert_df(df_in, val_col):
+                        if df_in is None or df_in.empty: return None
+                        new_df = df_in.copy()
+                        converted_vals = []
+                        for _, r in df_in.iterrows():
+                            d_s = r['date'].strftime('%Y-%m-%d') if hasattr(r['date'], 'strftime') else str(r['date'])
+                            v = convert_currency_amount(r[val_col], currency, BASE_CURRENCY_CODE, d_s, database_name, cursor, rate_cache)
+                            converted_vals.append(v)
+                        new_df[val_col] = converted_vals
+                        return new_df
+
+                    args['contributions_local_df'] = convert_df(contrib_df_sub, 'contributions')
+                    args['fees_local_df'] = convert_df(f_sub, 'fees')
+                    args['tax_local_df'] = convert_df(t_sub, 'tax')
+                    args['dividends_local_df'] = convert_df(d_sub, 'dividends')
+                    args['current_value_local'] = convert_currency_amount(current_val, currency, BASE_CURRENCY_CODE, val_date_str, database_name, cursor, rate_cache)
+                    args['local_inflation_df'] = local_inflation_df
+
+                metrics = calculate_investment_metrics(**args)
+
+                def get_m(row, col):
+                    try:
+                        v = metrics.loc[row, col]
+                        return float(v) if not pd.isna(v) else None
+                    except KeyError:
+                        return None
+
+                params = (
+                    investment_id, val_date_dt.date(),
+                    get_m("local", "net growth"), get_m("local", "total return"), get_m("local", "return multiple"), get_m("local", "cagr"), get_m("local", "irr"),
+                    get_m("local", "total fee ratio"), get_m("local", "total tax ratio"), get_m("local", "total cost ratio"), get_m("local", "dividend yield"),
+                    get_m("local", "fee ratio annualized"), get_m("local", "tax ratio annualized"), get_m("local", "cost ratio annualized"), get_m("local", "dividend yield annualized"),
+                    get_m("local", "total contributions"), get_m("local", "total fees"), get_m("local", "total tax"), get_m("local", "total dividends"),
+                    get_m("local", "number of contributions"), get_m("local", "average contributions"), get_m("local", "investment period"),
+
+                    get_m("local_inflation_adjusted", "net growth"), get_m("local_inflation_adjusted", "total return"), get_m("local_inflation_adjusted", "return multiple"), get_m("local_inflation_adjusted", "cagr"), get_m("local_inflation_adjusted", "irr"),
+                    get_m("local_inflation_adjusted", "total fee ratio"), get_m("local_inflation_adjusted", "total tax ratio"), get_m("local_inflation_adjusted", "total cost ratio"), get_m("local_inflation_adjusted", "dividend yield"),
+                    get_m("local_inflation_adjusted", "fee ratio annualized"), get_m("local_inflation_adjusted", "tax ratio annualized"), get_m("local_inflation_adjusted", "cost ratio annualized"), get_m("local_inflation_adjusted", "dividend yield annualized"),
+                    get_m("local_inflation_adjusted", "total contributions"), get_m("local_inflation_adjusted", "total fees"), get_m("local_inflation_adjusted", "total tax"), get_m("local_inflation_adjusted", "total dividends"),
+                    get_m("local_inflation_adjusted", "number of contributions"), get_m("local_inflation_adjusted", "average contributions"), get_m("local_inflation_adjusted", "investment period"),
+
+                    get_m("foreign", "net growth"), get_m("foreign", "total return"), get_m("foreign", "return multiple"), get_m("foreign", "cagr"), get_m("foreign", "irr"),
+                    get_m("foreign", "total fee ratio"), get_m("foreign", "total tax ratio"), get_m("foreign", "total cost ratio"), get_m("foreign", "dividend yield"),
+                    get_m("foreign", "fee ratio annualized"), get_m("foreign", "tax ratio annualized"), get_m("foreign", "cost ratio annualized"), get_m("foreign", "dividend yield annualized"),
+                    get_m("foreign", "total contributions"), get_m("foreign", "total fees"), get_m("foreign", "total tax"), get_m("foreign", "total dividends"),
+                    get_m("foreign", "number of contributions"), get_m("foreign", "average contributions"), get_m("foreign", "investment period"),
+
+                    get_m("foreign_inflation_adjusted", "net growth"), get_m("foreign_inflation_adjusted", "total return"), get_m("foreign_inflation_adjusted", "return multiple"), get_m("foreign_inflation_adjusted", "cagr"), get_m("foreign_inflation_adjusted", "irr"),
+                    get_m("foreign_inflation_adjusted", "total fee ratio"), get_m("foreign_inflation_adjusted", "total tax ratio"), get_m("foreign_inflation_adjusted", "total cost ratio"), get_m("foreign_inflation_adjusted", "dividend yield"),
+                    get_m("foreign_inflation_adjusted", "fee ratio annualized"), get_m("foreign_inflation_adjusted", "tax ratio annualized"), get_m("foreign_inflation_adjusted", "cost ratio annualized"), get_m("foreign_inflation_adjusted", "dividend yield annualized"),
+                    get_m("foreign_inflation_adjusted", "total contributions"), get_m("foreign_inflation_adjusted", "total fees"), get_m("foreign_inflation_adjusted", "total tax"), get_m("foreign_inflation_adjusted", "total dividends"),
+                    get_m("foreign_inflation_adjusted", "number of contributions"), get_m("foreign_inflation_adjusted", "average contributions"), get_m("foreign_inflation_adjusted", "investment period")
+                )
+                cursor.execute(insert_query, params)
+
             conn.commit()
-            print(f"Successfully updated metrics for investment {investment_id}")
+            print(f"Successfully updated historical metrics for investment {investment_id}")
 
     except Exception as e:
         print(f"Error updating investment metrics: {e}")
@@ -847,11 +829,17 @@ def get_investment_metrics_by_name_data(database_name: str, investment_name: str
 
         total_contributions = record.get("total_contributions") or 0
         total_current_value = record.get("total_current_value") or 0
-        total_return = record.get("total_return") or 0
+        # Use net_growth directly from the stored column rather than reconstructing
+        # it via (total_return_ratio * total_contributions), which is fragile.
+        net_growth = record.get("net_growth")
+        if net_growth is None:
+            # Fallback: derive from total_return ratio if net_growth not present
+            total_return_ratio = record.get("total_return") or 0
+            net_growth = float(total_return_ratio) * float(total_contributions)
         contribution_vs_growth.append({
             "period": period_str,
             "contributions": round(float(total_contributions), 2),
-            "growth": round(float(total_return) * float(total_contributions), 2),
+            "growth": round(float(net_growth), 2),
             "value": round(float(total_current_value), 2),
         })
 
@@ -899,6 +887,17 @@ def get_investment_metrics_by_name_data(database_name: str, investment_name: str
         "data_points": len(rows),
         "generated_at": datetime.now().isoformat(),
         "base_currency": BASE_CURRENCY_CODE,
+        # Top-level summary values consumed by MetricCard widgets in the frontend
+        "total_current_value": key_metrics["total_current_value"],
+        "total_return_amount": key_metrics["total_return"],   # net growth in currency
+        "total_return_pct": key_metrics["total_return_pct"],
+        "thresholds": {
+            "excellent_sharpe": EXCELLENT_SHARPE_RATIO,
+            "good_sharpe": GOOD_SHARPE_RATIO,
+            "good_volatility": GOOD_VOLATILITY_THRESHOLD,
+            "excellent_cagr": CAGR_EXCELLENT_THRESHOLD,
+            "good_cagr": CAGR_GOOD_THRESHOLD
+        }
     }
 
 def recalculate_investment_metrics_history(database_name: str = DEFAULT_DB) -> None:
@@ -1040,8 +1039,8 @@ def calculate_portfolio_irr(database_name: str, base_currency: str = None) -> di
 
         def _convert(amount, currency):
             if currency and currency.upper() != base_currency.upper():
-                rate = get_exchange_rate(currency, base_currency, database_name=database_name)
-                return amount * rate
+                rate, _ = get_exchange_rate(currency, base_currency, database_name=database_name)
+                return float(amount) * float(rate)
             return float(amount)
 
         for row in contributions:
@@ -1238,6 +1237,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 # Portfolio-wide aggregation using LATEST metrics per investment
                 # For ratios, we weight by contributions; for amounts we sum.
                 # This avoids averaging ratios which is mathematically invalid.
+                # We also pull investment_period so we can compute annualised CAGR
+                # per investment and weight it by contributions.
                 query = f"""
                     SELECT 
                         im.metrics_date,
@@ -1254,7 +1255,8 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                         CASE WHEN SUM({prefix}total_contributions) > 0
                              THEN SUM({prefix}total_dividends) / SUM({prefix}total_contributions)
                              ELSE 0 END as dividend_yield,
-                        SUM({prefix}net_growth) as net_growth
+                        SUM({prefix}net_growth) as net_growth,
+                        MAX({prefix}investment_period) as max_investment_period
                     FROM investment_metrics im
                     JOIN investments i ON im.investment_id = i.id
                     WHERE im.metrics_date = (
@@ -1323,22 +1325,29 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             if filter_type == "portfolio":
                 for idx, row in df.iterrows():
                     period = row['metrics_date'].strftime("%Y-%m")
-                    # Use the properly computed total_return (portfolio-weighted)
-                    return_pct = round(float(row['total_return']) * 100, 2) if pd.notna(row['total_return']) else 0
-                    
+                    # total_return = net_growth / total_contributions (cumulative since inception)
+                    total_return = float(row['total_return']) if pd.notna(row['total_return']) else 0
+                    return_pct = round(total_return * 100, 2)
+
+                    # Compute annualised CAGR from return multiple and investment period
+                    inv_period = float(row.get('max_investment_period') or 0)
+                    if inv_period > 0 and total_return > -1:
+                        cagr_val = round(((1 + total_return) ** (1.0 / inv_period) - 1) * 100, 2)
+                    else:
+                        cagr_val = return_pct  # fallback when period unknown
+
                     portfolio_performance_return.append({
                         "period": period,
                         "value": return_pct,
                         "index": idx
                     })
-                    
-                    # For portfolio filter, we store total_return as CAGR proxy
+
                     cagr_trend.append({
                         "period": period,
-                        "value": return_pct,
+                        "value": cagr_val,
                         "index": idx
                     })
-                    
+
                     # IRR is computed separately via calculate_portfolio_irr
                     irr_trend.append({
                         "period": period,
@@ -1353,68 +1362,97 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 "five_year": []
             }
             
-            if filter_type == "portfolio" and len(df) >= 12:
-                # Calculate 1-year rolling returns
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    avg_return = period_df['total_return'].mean() * 100
-                    rolling_returns["one_year"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
-                        "index": i
-                    })
-                
-                # Calculate 3-year rolling returns
-                if len(df) >= 36:
-                    for i in range(0, len(df) - 35, 3):
-                        period_df = df.iloc[i:i+36]
-                        avg_return = period_df['total_return'].mean() * 100
+            if filter_type == "portfolio" and len(df) >= 2:
+                # Compute period-over-period returns from consecutive total_current_value.
+                # This gives the actual periodic return for each time step, which is
+                # the correct input for rolling windows and risk metrics.
+                # periodic_ret[i] = (value[i] - value[i-1]) / value[i-1]
+                cv = df['total_current_value'].values.astype(float)
+                periodic_rets = []
+                for i in range(1, len(cv)):
+                    if cv[i-1] > 0:
+                        periodic_rets.append((cv[i] - cv[i-1]) / cv[i-1])
+                    else:
+                        periodic_rets.append(0.0)
+                periodic_ser = pd.Series(periodic_rets, index=df.index[1:])
+
+                if len(periodic_ser) >= 11:
+                    # 1-year (12-step) rolling: annualised return of each window
+                    for i in range(len(periodic_ser) - 10):
+                        window = periodic_ser.iloc[i:i+12]
+                        # Geometric compounding over window
+                        compound = float(np.prod(1 + window)) - 1
+                        rolling_returns["one_year"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(compound * 100, 2),
+                            "index": i
+                        })
+
+                if len(periodic_ser) >= 35:
+                    # 3-year (36-step) rolling
+                    for i in range(0, len(periodic_ser) - 34, 3):
+                        window = periodic_ser.iloc[i:i+36]
+                        compound = float(np.prod(1 + window)) - 1
                         rolling_returns["three_year"].append({
-                            "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-Q%q"),
-                            "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
+                            "period": df.iloc[i+36]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(compound * 100, 2),
                             "index": len(rolling_returns["three_year"])
                         })
-                
-                # Calculate 5-year rolling returns
-                if len(df) >= 60:
-                    for i in range(0, len(df) - 59, 6):
-                        period_df = df.iloc[i:i+60]
-                        avg_return = period_df['total_return'].mean() * 100
+
+                if len(periodic_ser) >= 59:
+                    # 5-year (60-step) rolling
+                    for i in range(0, len(periodic_ser) - 58, 6):
+                        window = periodic_ser.iloc[i:i+60]
+                        compound = float(np.prod(1 + window)) - 1
                         rolling_returns["five_year"].append({
-                            "period": period_df.iloc[-1]['metrics_date'].strftime("%Y"),
-                            "value": round(float(avg_return), 2) if pd.notna(avg_return) else 0,
+                            "period": df.iloc[i+60]['metrics_date'].strftime("%Y"),
+                            "value": round(compound * 100, 2),
                             "index": len(rolling_returns["five_year"])
                         })
-            
-            # Risk Metrics (volatility calculated from total_return variance)
+
+            # Risk Metrics: volatility and Sharpe computed on periodic returns
             risk_metrics = {
                 "volatility": [],
                 "sharpe_ratio": [],
                 "max_drawdown": []
             }
-            
-            if filter_type == "portfolio":
-                # Calculate rolling volatility (12-month windows) using total_return
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    volatility = period_df['total_return'].std() * 100 if len(period_df) > 1 else 0
-                    risk_metrics["volatility"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(volatility), 2) if pd.notna(volatility) else 0,
-                        "index": i
-                    })
-                
-                # Sharpe ratio (simplified: avg_return / volatility)
-                for i in range(len(df) - 11):
-                    period_df = df.iloc[i:i+12]
-                    avg_return = period_df['total_return'].mean()
-                    vol = period_df['total_return'].std()
-                    sharpe = (avg_return / vol) if vol > 0 else 0
-                    risk_metrics["sharpe_ratio"].append({
-                        "period": period_df.iloc[-1]['metrics_date'].strftime("%Y-%m"),
-                        "value": round(float(sharpe), 2) if pd.notna(sharpe) else 0,
-                        "index": i
-                    })
+
+            if filter_type == "portfolio" and len(df) >= 2:
+                cv = df['total_current_value'].values.astype(float)
+                periodic_rets = []
+                for i in range(1, len(cv)):
+                    if cv[i-1] > 0:
+                        periodic_rets.append((cv[i] - cv[i-1]) / cv[i-1])
+                    else:
+                        periodic_rets.append(0.0)
+                periodic_ser = pd.Series(periodic_rets, index=df.index[1:])
+
+                # Annualised volatility using 12-month rolling window.
+                # Multiply by sqrt(12) to annualise from monthly periodic returns.
+                annualise = float(np.sqrt(12))
+                if len(periodic_ser) >= 12:
+                    for i in range(len(periodic_ser) - 11):
+                        window = periodic_ser.iloc[i:i+12]
+                        vol = float(window.std(ddof=1)) * annualise * 100
+                        risk_metrics["volatility"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(vol, 2) if not np.isnan(vol) else 0,
+                            "index": i
+                        })
+
+                # Sharpe ratio: (annualised_return / annualised_vol) per 12-month window.
+                # Risk-free rate assumed 0 for simplicity (can be made configurable).
+                if len(periodic_ser) >= 12:
+                    for i in range(len(periodic_ser) - 11):
+                        window = periodic_ser.iloc[i:i+12]
+                        ann_ret = float(np.prod(1 + window) - 1)  # geometric annual
+                        ann_vol = float(window.std(ddof=1)) * annualise
+                        sharpe = (ann_ret / ann_vol) if ann_vol > 0 else 0
+                        risk_metrics["sharpe_ratio"].append({
+                            "period": df.iloc[i+12]['metrics_date'].strftime("%Y-%m"),
+                            "value": round(sharpe, 4) if not np.isnan(sharpe) else 0,
+                            "index": i
+                        })
             
             # Contribution vs Growth
             contribution_vs_growth = []
@@ -1473,24 +1511,34 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
             
             # Generate conclusion
             latest = df.iloc[-1]
-            total_return_pct = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
+            total_return_ratio = float(latest['total_return']) if pd.notna(latest['total_return']) else 0
             total_contributions = float(latest['total_contributions']) if pd.notna(latest['total_contributions']) else 0
+            total_net_growth = float(latest.get('net_growth', 0)) if pd.notna(latest.get('net_growth')) else 0
+            total_current_value_latest = float(latest.get('total_current_value', 0)) if pd.notna(latest.get('total_current_value')) else 0
             total_fees = float(latest.get('total_fees', 0)) if pd.notna(latest.get('total_fees')) else 0
-            
-            if total_return_pct > CAGR_EXCELLENT_THRESHOLD:
+
+            # Compute annualised CAGR for the conclusion and threshold check
+            inv_period_latest = float(latest.get('max_investment_period') or 0)
+            if inv_period_latest > 0 and total_return_ratio > -1:
+                cagr_latest = ((1 + total_return_ratio) ** (1.0 / inv_period_latest)) - 1
+            else:
+                cagr_latest = total_return_ratio
+
+            if cagr_latest > CAGR_EXCELLENT_THRESHOLD:
                 performance = "Excellent"
-            elif total_return_pct > CAGR_GOOD_THRESHOLD:
+            elif cagr_latest > CAGR_GOOD_THRESHOLD:
                 performance = "Good"
-            elif total_return_pct > CAGR_MODERATE_THRESHOLD:
+            elif cagr_latest > CAGR_MODERATE_THRESHOLD:
                 performance = "Moderate"
             else:
                 performance = "Needs Attention"
-            
-            conclusion = f"{performance} {filter_type} performance with {total_return_pct*100:.2f}% total return. "
+
+            conclusion = f"{performance} {filter_type} performance with {total_return_ratio*100:.2f}% total return "
+            conclusion += f"({cagr_latest*100:.2f}% p.a. CAGR). "
             conclusion += f"Total contributions: {base_currency} {total_contributions:,.2f}. "
             if total_fees > 0:
                 conclusion += f"Total fees paid: {base_currency} {total_fees:,.2f}."
-            
+
             return {
                 "portfolio_performance_return": portfolio_performance_return,
                 "rolling_returns": rolling_returns,
@@ -1508,6 +1556,10 @@ def get_investment_metrics_data(database_name: str, base_currency: str = None, f
                 "base_currency": base_currency,
                 "data_points": len(df),
                 "data_source": "DATABASE",
+                # Top-level summary values consumed by MetricCard widgets in the frontend
+                "total_current_value": round(total_current_value_latest, 2),
+                "total_return_amount": round(total_net_growth, 2),
+                "total_return_pct": round(total_return_ratio * 100, 2),
                 "thresholds": {
                     "excellent_sharpe": EXCELLENT_SHARPE_RATIO,
                     "good_sharpe": GOOD_SHARPE_RATIO,

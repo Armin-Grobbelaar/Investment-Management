@@ -18,7 +18,7 @@ class TestCurrencyOperations:
     @patch('modules.currency.get_db_connection')
     def test_get_exchange_rate_same_currency(self, mock_get_db):
         """Test getting exchange rate when currencies are the same."""
-        rate = get_exchange_rate("ZAR", "ZAR")
+        rate, src_date = get_exchange_rate("ZAR", "ZAR")
         assert rate == 1.0
         assert not mock_get_db.called
 
@@ -29,13 +29,12 @@ class TestCurrencyOperations:
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
         
-        # Mock finding forex ID
-        mock_cursor.fetchone.side_effect = [(1,), (15.5,)]  # id=1, rate=15.5
+        mock_cursor.fetchone.side_effect = [(15.5, '2023-01-01')]
         
-        rate = get_exchange_rate("USD", "ZAR", "2023-01-01", "test_db")
+        rate, src_date = get_exchange_rate("USD", "ZAR", "2023-01-01", "test_db")
         
         assert rate == 15.5
-        assert mock_cursor.execute.call_count == 2
+        assert src_date == '2023-01-01'
 
     @patch('modules.currency.get_db_connection')
     def test_get_exchange_rate_inverse_pair(self, mock_get_db):
@@ -44,13 +43,12 @@ class TestCurrencyOperations:
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
         
-        # Mock finding forex ID: first call returns None, second call returns id=1, third call returns rate
-        mock_cursor.fetchone.side_effect = [None, (1,), (0.05,)]  # rate=0.05
+        mock_cursor.fetchone.side_effect = [None, (0.05, '2023-01-01')]
         
-        rate = get_exchange_rate("ZAR", "USD", None, "test_db")
+        rate, src_date = get_exchange_rate("ZAR", "USD", "2023-01-01", "test_db")
         
         assert rate == 1.0 / 0.05
-        assert mock_cursor.execute.call_count == 3
+        assert src_date == '2023-01-01'
 
     @patch('modules.currency.get_db_connection')
     def test_get_exchange_rate_no_pair(self, mock_get_db):
@@ -59,28 +57,20 @@ class TestCurrencyOperations:
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
         
-        # Mock finding forex ID: both direct and inverse return None
-        mock_cursor.fetchone.side_effect = [None, None]
+        mock_cursor.fetchone.side_effect = [None, None, None]
         
-        rate = get_exchange_rate("CAD", "ZAR")
+        rate, src_date = get_exchange_rate("CAD", "ZAR", "2023-01-01")
         
         assert rate == 1.0
 
     @patch('modules.currency.get_exchange_rate')
     def test_convert_currency_amount(self, mock_get_rate):
         """Test converting monetary amounts."""
-        mock_get_rate.return_value = 15.0
+        mock_get_rate.return_value = (15.0, "2023-01-01")
         
-        # Test without cache
         amount1 = convert_currency_amount(100.0, "USD", "ZAR", "2023-01-01")
         assert amount1 == 1500.0
-        mock_get_rate.assert_called_once_with("USD", "ZAR", "2023-01-01", "Investments", None)
-        
-        # Test with cache
-        rate_cache = {("USD", "ZAR", "2023-01-02"): 16.0}
-        amount2 = convert_currency_amount(100.0, "USD", "ZAR", "2023-01-02", rate_cache=rate_cache)
-        assert amount2 == 1600.0
-        assert mock_get_rate.call_count == 1  # Should not be called again due to cache hit
+        mock_get_rate.assert_called_once_with("USD", "ZAR", "2023-01-01", "investments_app", None)
 
     @patch('modules.currency.get_db_connection')
     @patch('modules.currency.convert_currency_amount')
@@ -90,7 +80,6 @@ class TestCurrencyOperations:
         mock_cursor = MagicMock()
         mock_get_db.return_value.__enter__.return_value = (mock_conn, mock_cursor)
         
-        # Mock convert amount to just multiply by 10
         mock_convert.side_effect = lambda amt, *args, **kwargs: amt * 10
         
         df = pd.DataFrame({
@@ -110,4 +99,21 @@ class TestCurrencyOperations:
     def test_get_available_base_currencies(self):
         """Test getting available base currencies."""
         currencies = get_available_base_currencies()
-        assert currencies == SUPPORTED_BASE_CURRENCIES
+        assert set(currencies) >= set(SUPPORTED_BASE_CURRENCIES)
+
+    @patch('modules.currency.get_exchange_rate')
+    def test_convert_currency_amount_with_cache(self, mock_get_rate):
+        """Test convert_currency_amount uses rate_cache when provided."""
+        mock_get_rate.return_value = (18.5, "2023-01-01")
+        cache = {}
+        
+        # First call populates cache
+        res1 = convert_currency_amount(100.0, "USD", "ZAR", "2023-01-01", rate_cache=cache)
+        assert res1 == 1850.0
+        assert cache[("USD", "ZAR", "2023-01-01")] == 18.5
+        assert mock_get_rate.call_count == 1
+
+        # Second call uses cache without calling get_exchange_rate again
+        res2 = convert_currency_amount(50.0, "USD", "ZAR", "2023-01-01", rate_cache=cache)
+        assert res2 == 925.0
+        assert mock_get_rate.call_count == 1

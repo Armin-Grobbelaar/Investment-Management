@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import Investments from "./Investments/page";
+import { Providers } from "./providers";
+import SideMenyDrawer from "./Reusable Components/Drawers/SideMenyDrawer";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -10,7 +11,6 @@ export const metadata: Metadata = {
   description: "See all investments in one place",
 };
 
-import SideMenyDrawer from "./Reusable Components/Drawers/SideMenyDrawer";
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -19,8 +19,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+        <Providers>
           <SideMenyDrawer />
           {children}
+        </Providers>
       </body>
     </html>
   );

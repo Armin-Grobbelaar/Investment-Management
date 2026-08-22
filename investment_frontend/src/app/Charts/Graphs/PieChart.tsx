@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import { Pie } from 'react-chartjs-2';
+import { Doughnut } from 'react-chartjs-2';
 import { Chart, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 import { Box, Typography } from '@mui/material';
 
@@ -37,6 +37,7 @@ const PieChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    cutout: '70%', // makes it a nice donut
     plugins: {
       legend: {
         display: true,
@@ -75,7 +76,7 @@ const PieChart: React.FC<Props> = ({ data, title, theme = 'light' }) => {
         </Typography>
       )}
       <Box sx={{ flex: 1, width: '100%', minHeight: '260px', maxHeight: '340px', position: 'relative' }}>
-        <Pie data={data} options={chartOptions} />
+        <Doughnut data={data} options={chartOptions} />
       </Box>
     </Box>
   );

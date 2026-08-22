@@ -2,7 +2,6 @@ import type { NextAuthOptions } from 'next-auth'
 import GitHubProvider from 'next-auth/providers/github'
 import CredentialsProvider from 'next-auth/providers/credentials'
 
-// Session signing secret must come from the environment — never hardcode it.
 const sessionSecret = process.env.NEXTAUTH_SECRET || '';
 if (!sessionSecret) {
     console.warn(
@@ -13,6 +12,22 @@ if (!sessionSecret) {
 
 export const options: NextAuthOptions = {
     secret: sessionSecret,
+    callbacks: {
+        async jwt({ token, user }) {
+            if (user) {
+                token.user_id = (user as any).id;
+                token.database_name = (user as any).database_name;
+                token.access_token = (user as any).token;
+            }
+            return token;
+        },
+        async session({ session, token }) {
+            (session as any).user_id = token.user_id;
+            (session as any).database_name = token.database_name;
+            (session as any).access_token = token.access_token;
+            return session;
+        }
+    },
     providers: [
         GitHubProvider({
             clientId: process.env.GITHUB_ID as string,
@@ -33,32 +48,38 @@ export const options: NextAuthOptions = {
                 }
             },
             async authorize(credentials) {
-                // This is where you need to retrieve user data 
-                // to verify with credentials
-                // Docs: https://next-auth.js.org/configuration/providers/credentials
-                //
-                // SECURITY: Never hardcode usernames/passwords in source.
-                // Credentials must come from environment variables.
-                // TODO: Replace this env-var comparison with a backend user
-                // lookup (e.g. the /add_user endpoint or the users table) that
-                // verifies against a stored password hash.
-                const username = process.env.ADMIN_USERNAME;
-                const password = process.env.ADMIN_PASSWORD;
-
-                if (!username || !password) {
-                    console.warn(
-                        '[nextauth] ADMIN_USERNAME / ADMIN_PASSWORD are not set. ' +
-                        'Credentials sign-in is disabled until they are configured.'
-                    );
+                if (!credentials?.username || !credentials?.password) {
                     return null;
                 }
 
-                if (credentials?.username === username && credentials?.password === password) {
-                    return { id: "1", name: username }
-                } else {
-                    return null
+                try {
+                    const backendUrl = process.env.BACKEND_URL || 'http://127.0.0.1:3337';
+                    const response = await fetch(`${backendUrl}/verify_user`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: credentials.username,
+                            password: credentials.password
+                        })
+                    });
+
+                    if (!response.ok) {
+                        return null;
+                    }
+
+                    const user = await response.json();
+                    return {
+                        id: user.id.toString(),
+                        name: user.username,
+                        email: user.email,
+                        database_name: user.database_name || "investments_app",
+                        token: user.token
+                    };
+                } catch (error) {
+                    console.error('Authentication error:', error);
+                    return null;
                 }
             }
         })
     ],
-} 
+}

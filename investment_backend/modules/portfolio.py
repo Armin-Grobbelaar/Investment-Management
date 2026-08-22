@@ -1,6 +1,6 @@
 from datetime import date
 from .database import get_db_connection, DEFAULT_DB
-from .currency import get_exchange_rate, CURRENCY_SYMBOLS, NATIVE_CURRENCY
+from .currency import get_exchange_rate, CURRENCY_SYMBOLS, NATIVE_CURRENCY, BASE_CURRENCY_CODE, resolve_currency_code
 
 # Portfolio configuration constants
 PORTFOLIO_TICKER = "PORTFOLIO"
@@ -11,37 +11,19 @@ PORTFOLIO_TYPE = "Portfolio"
 def _get_exchange_rate_for_portfolio(cursor, from_currency, to_currency, target_date, database_name):
     """
     Get exchange rate for portfolio aggregation.
-    Uses existing get_exchange_rate function with fallback.
+    Uses existing get_exchange_rate function.
     """
-    if from_currency == to_currency:
+    from_c = resolve_currency_code(from_currency)
+    to_c = resolve_currency_code(to_currency)
+    if from_c == to_c:
         return 1.0
     
     try:
-        # Use the existing exchange rate function
-        return get_exchange_rate(from_currency, to_currency, target_date, database_name)
-    except Exception:
-        # Fallback: Try to use current forex data
-        try:
-            ticker = f"{from_currency}{to_currency}=X"
-            # Note: We need a new connection/cursor here if we want to query independently,
-            # but since we are inside a transaction usually, we might want to use the passed cursor if possible.
-            # However, get_exchange_rate uses its own connection context.
-            # Let's try to query directly with the passed cursor if possible, or skip if complex.
-            
-            cursor.execute("""
-                SELECT unit_price FROM investments i
-                JOIN v_investment_prices up ON i.id = up.investment_id
-                WHERE i.investment_ticker = %s
-                ORDER BY up.unit_price_date DESC LIMIT 1
-            """, (ticker,))
-            result = cursor.fetchone()
-            if result:
-                return float(result[0])
-        except Exception:
-            pass
+        rate, _ = get_exchange_rate(from_c, to_c, target_date, database_name, cursor=cursor)
+        return float(rate)
+    except Exception as e:
+        print(f"Warning: Exception getting exchange rate for {from_c} to {to_c} on {target_date}: {e}")
     
-    # Ultimate fallback
-    print(f"Warning: No exchange rate for {from_currency} to {to_currency} on {target_date}, using 1.0")
     return 1.0
 
 def ensure_portfolio_exists(database_name=DEFAULT_DB):
@@ -143,7 +125,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
                     else:
                         currency_code = currency
                     
-                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, "ZAR", txn_date, database_name)
+                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, BASE_CURRENCY_CODE, txn_date, database_name)
                     txn_amount_zar = txn_amount * exchange_rate
                     
                     key = (txn_date, txn_type)
@@ -175,7 +157,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
                 
                 for fee_date, fee_type, fee_paid, fee_freq, num_units, inv_fee in cursor.fetchall():
                     currency_code = CURRENCY_SYMBOLS.get(currency, currency) if len(currency) == 1 else currency
-                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, "ZAR", fee_date, database_name)
+                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, BASE_CURRENCY_CODE, fee_date, database_name)
                     fee_paid_zar = fee_paid * exchange_rate
                     total_fees += fee_paid_zar
                     
@@ -209,7 +191,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
                 
                 for tax_date, tax_type, tax_paid, tax_pct in cursor.fetchall():
                     currency_code = CURRENCY_SYMBOLS.get(currency, currency) if len(currency) == 1 else currency
-                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, "ZAR", tax_date, database_name)
+                    exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, BASE_CURRENCY_CODE, tax_date, database_name)
                     tax_paid_zar = tax_paid * exchange_rate
                     total_tax += tax_paid_zar
                     
@@ -278,7 +260,7 @@ def update_portfolio(database_name=DEFAULT_DB, silent=False):
                             
                             # Convert to ZAR
                             currency_code = CURRENCY_SYMBOLS.get(currency, currency) if len(currency) == 1 else currency
-                            exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, "ZAR", price_date, database_name)
+                            exchange_rate = _get_exchange_rate_for_portfolio(cursor, currency_code, BASE_CURRENCY_CODE, price_date, database_name)
                             value_zar = value_foreign * exchange_rate
                             
                             total_value_zar += value_zar

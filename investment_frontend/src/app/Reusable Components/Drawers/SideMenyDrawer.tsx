@@ -21,6 +21,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import SavingsIcon from '@mui/icons-material/Savings';
 
 interface MenuItem {
   heading: string;
@@ -42,6 +43,7 @@ const PAGE_LINKS = [
   { label: 'Net Worth', href: '/NetWorth', icon: AccountBalanceWalletIcon },
   { label: 'Predictions', href: '/ViewInvestmentPredictions', icon: InsightsIcon },
   { label: 'Bulk Import', href: '/BulkImport', icon: UploadFileIcon },
+  { label: 'Retirement & FIRE', href: '/RetirementPlanning', icon: SavingsIcon },
 ];
 
 const DrawerComponent: React.FC<Props> = ({ menuItems: propMenuItems = [] }) => {
